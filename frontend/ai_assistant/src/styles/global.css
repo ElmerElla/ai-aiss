@@ -1,0 +1,113 @@
+/* ============================================================
+   全局样式 & CSS 变量
+   ============================================================ */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+:root {
+  /* 主色 */
+  --primary: #2A6FDB;
+  --primary-light: #f0f5ff;
+  --primary-dark: #1d5bc0;
+  /* 强调色 */
+  --accent: #F57C00;
+  --accent-light: #fff3e0;
+  /* 背景 */
+  --bg: #f9fbff;
+  --bg-card: #ffffff;
+  /* 边框 */
+  --border: #e0e6ed;
+  --border-light: #f0f3f8;
+  /* 文字 */
+  --text-primary: #333333;
+  --text-secondary: #555555;
+  --text-muted: #777777;
+  --text-light: #999999;
+  /* 语义色 */
+  --danger: #e53935;
+  --danger-light: #ffebee;
+  --success: #43a047;
+  --success-light: #e8f5e9;
+  --warning: #ffa000;
+  --warning-light: #fff8e1;
+  /* 阴影 */
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.06);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.12);
+  /* 圆角 */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  /* 过渡 */
+  --transition: all 0.25s ease;
+}
+
+body {
+  font-family: "Inter", "PingFang SC", "Microsoft YaHei", sans-serif;
+  background-color: var(--bg);
+  color: var(--text-primary);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+a {
+  text-decoration: none;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+  border: none;
+  outline: none;
+  font-family: inherit;
+}
+
+input,
+textarea {
+  font-family: inherit;
+  outline: none;
+}
+
+/* 滚动条 */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #c0c8d8;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #a0a8b8;
+}
+
+/* 路由过渡 */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.3s ease;
+}
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
+.slide-up-enter-active,
+.slide-up-leave-active {
+  transition: transform 0.3s ease, opacity 0.3s ease;
+}
+.slide-up-enter-from {
+  transform: translateY(12px);
+  opacity: 0;
+}
+.slide-up-leave-to {
+  transform: translateY(-12px);
+  opacity: 0;
+}
