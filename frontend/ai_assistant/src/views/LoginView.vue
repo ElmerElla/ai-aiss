@@ -75,6 +75,17 @@
   </div>
 </template>
 
+/**
+ * 学生登录视图组件
+ *
+ * 功能介绍：
+ * · 提供学生账号（学号 + 密码）登录界面
+ * · 密码支持显示/隐藏切换
+ * · 登录时调用 authStore.login（内部自动 AES-CBC 加密密码）
+ * · 登录成功后自动跳转至 Chat 聊天页
+ * · 提供管理员后台入口链接
+ * · 界面包含渐变背景装饰与动画卡片效果
+ */
 <script setup>
 import { ref, reactive } from 'vue'
 import { useRouter } from 'vue-router'
@@ -91,6 +102,11 @@ const showPassword = ref(false)
 const isSubmitting = ref(false)
 const errorMsg = ref('')
 
+/**
+ * 处理学生登录表单提交
+ * 前端校验学号与密码非空后调用 Pinia authStore 登录
+ * 错误处理：401 显示学号或密码错误，其他显示网络或服务异常
+ */
 async function handleLogin() {
   errorMsg.value = ''
 

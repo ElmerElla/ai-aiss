@@ -1,7 +1,23 @@
 /**
- * Axios 实例 — 统一拦截器
- * · 请求拦截：自动附加 JWT Bearer Token
- * · 响应拦截：401 自动登出并跳转登录页
+ * Axios HTTP 客户端实例（学生端）
+ *
+ * 功能介绍：
+ * -----------
+ * 本模块创建并导出一个配置好的 Axios 实例，用于学生端所有 API 请求。
+ *
+ * 请求拦截器：
+ * - 自动从 localStorage 读取 campus_ai_token
+ * - 为每个请求附加 Authorization: Bearer {token} 请求头
+ *
+ * 响应拦截器：
+ * - 捕获 401 未授权响应
+ * - 自动调用 authStore.logout() 清除登录状态
+ * - 自动跳转至登录页面
+ *
+ * 基础配置：
+ * - baseURL: /api/v1
+ * - timeout: 60000ms
+ * - Content-Type: application/json
  */
 import axios from 'axios'
 import { useAuthStore } from '@/stores/auth'

@@ -1,7 +1,22 @@
-"""LangChain + DashScope 适配器工具。
+"""
+LangChain + DashScope 适配器模块
 
-此模块将提供商特定的 API 调用集中在一处，同时提供
-与 LangChain 兼容的辅助函数，用于提示渲染、调用和流式处理。
+功能介绍：
+-----------
+本模块是连接 LangChain 提示模板与阿里云 DashScope API 的适配层，
+集中处理所有 LLM 相关的 API 调用。
+
+主要功能：
+- build_dashscope_messages(): 将 LangChain ChatPromptTemplate 渲染为 DashScope 消息格式
+- ainvoke_chat_prompt(): 异步非流式调用 DashScope 聊天 API
+- stream_chat_prompt(): 同步流式调用 DashScope 聊天 API（返回生成器）
+
+输入截断：
+- 自动按总字符数裁剪消息，优先丢弃旧历史，再裁剪最新消息
+- 防止超出 DashScope 最大输入长度限制
+
+代理控制：
+- 可选忽略环境 HTTP_PROXY 变量，避免意外代理路由
 """
 from __future__ import annotations
 
@@ -18,11 +33,16 @@ from app.utils.logger import logger
 
 
 def _count_messages_chars(messages: list[dict[str, str]]) -> int:
+    """计算消息列表中所有内容的总字符数。"""
     return sum(len(m.get("content") or "") for m in messages)
 
 
 def _truncate_tail(text: str, max_chars: int) -> str:
-    """截断文本尾部并附加说明，保证返回长度不超过 max_chars。"""
+    """
+    截断文本尾部并附加说明，保证返回长度不超过 max_chars。
+    
+    若提示文本过长，自动退化为硬截断。
+    """
     if max_chars <= 0:
         return ""
     if len(text) <= max_chars:
@@ -48,7 +68,16 @@ def _trim_messages_for_dashscope(
     *,
     max_total_chars: int,
 ) -> tuple[list[dict[str, str]], dict[str, int]]:
-    """按总字符数裁剪消息，优先丢弃旧历史，再裁剪最后一条。"""
+    """
+    按总字符数裁剪消息列表，使其适合 DashScope API 输入限制。
+    
+    裁剪策略：
+        1. 优先丢弃中间旧历史消息（保留 system 和最新 user）
+        2. 仍超限时裁剪最后一条消息内容
+        3. 极端情况下裁剪首条 system 消息
+    
+    返回 (裁剪后消息列表, 裁剪统计信息)。
+    """
     if max_total_chars <= 0 or not messages:
         return messages, {"original_chars": 0, "final_chars": 0, "dropped_messages": 0}
 
@@ -97,7 +126,12 @@ def _trim_messages_for_dashscope(
 
 
 def _build_dashscope_session() -> requests.Session | None:
-    """Create a DashScope HTTP session, optionally ignoring env proxy vars."""
+    """
+    创建 DashScope HTTP 会话，可选忽略环境代理变量。
+    
+    当 DASHSCOPE_TRUST_ENV_PROXY=False 时，创建独立 Session 并禁用代理，
+    避免主机级 HTTP_PROXY 变量导致意外路由。
+    """
     if settings.DASHSCOPE_TRUST_ENV_PROXY:
         return None
 
@@ -109,7 +143,11 @@ def _build_dashscope_session() -> requests.Session | None:
 
 
 def _message_to_dashscope(message: BaseMessage) -> dict[str, str]:
-    """将 LangChain 消息对象转换为 DashScope 的消息格式。"""
+    """
+    将 LangChain 消息对象转换为 DashScope 的消息格式字典。
+    
+    角色映射：SystemMessage → system, AIMessage → assistant, HumanMessage → user
+    """
     role = "user"
     if isinstance(message, SystemMessage):
         role = "system"
@@ -129,7 +167,13 @@ def build_dashscope_messages(
     prompt: ChatPromptTemplate,
     variables: dict[str, Any],
 ) -> list[dict[str, str]]:
-    """渲染 ChatPromptTemplate 并将其转换为 DashScope 消息。"""
+    """
+    渲染 LangChain ChatPromptTemplate 并转换为 DashScope 消息列表。
+    
+    参数:
+        prompt: LangChain 聊天提示模板。
+        variables: 模板变量字典。
+    """
     prompt_value = prompt.invoke(variables)
     messages = [_message_to_dashscope(m) for m in prompt_value.to_messages()]
     logger.debug("DashScope messages built: count={}", len(messages))
@@ -144,7 +188,22 @@ async def ainvoke_chat_prompt(
     temperature: float,
     max_tokens: int | None = None,
 ) -> str:
-    """根据 LangChain 提示模板执行非流式 DashScope 聊天调用。"""
+    """
+    异步非流式调用 DashScope 聊天 API。
+    
+    参数:
+        prompt: LangChain 聊天提示模板。
+        variables: 模板变量字典。
+        model: DashScope 模型名称。
+        temperature: 采样温度。
+        max_tokens: 最大生成令牌数（可选）。
+    
+    返回:
+        模型生成的文本内容。
+    
+    异常:
+        RuntimeError: API 调用失败或返回非 200 状态码。
+    """
     raw_messages = build_dashscope_messages(prompt, variables)
     messages, trim_stats = _trim_messages_for_dashscope(
         raw_messages,
@@ -211,7 +270,22 @@ def stream_chat_prompt(
     temperature: float,
     max_tokens: int | None = None,
 ) -> Iterator[str]:
-    """通过 LangChain 提示模板流式返回 DashScope 聊天调用的块。"""
+    """
+    同步流式调用 DashScope 聊天 API，返回文本块生成器。
+    
+    参数:
+        prompt: LangChain 聊天提示模板。
+        variables: 模板变量字典。
+        model: DashScope 模型名称。
+        temperature: 采样温度。
+        max_tokens: 最大生成令牌数（可选）。
+    
+    返回:
+        逐块产出的文本生成器，供 SSE 流式传输使用。
+    
+    异常:
+        RuntimeError: 流式过程中 API 返回错误状态码。
+    """
     raw_messages = build_dashscope_messages(prompt, variables)
     messages, trim_stats = _trim_messages_for_dashscope(
         raw_messages,

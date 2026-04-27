@@ -1,3 +1,19 @@
+"""
+管理员相关 Pydantic 模式模块
+
+功能介绍：
+-----------
+本模块定义了管理员接口的请求和响应数据模型（Schema），
+用于 FastAPI 的请求校验、序列化和自动文档生成。
+
+模式列表：
+- AdminLoginRequest / AdminTokenResponse: 登录请求与响应
+- AdminMeResponse: 当前管理员信息
+- AdminDashboardSummaryResponse: 管理面板统计
+- AdminTermItem / AdminClassItem: 元数据项
+- AdminScheduleItem / AdminScheduleListResponse: 课表查询
+- UpdateScheduleStatusRequest / UpdateScheduleStatusResponse: 课表状态更新
+"""
 from __future__ import annotations
 
 from datetime import date, datetime

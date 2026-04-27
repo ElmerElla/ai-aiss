@@ -1,7 +1,23 @@
-"""知识检索服务，使用阿里云百炼检索API。
+"""
+知识检索服务模块
 
-使用百炼SDK直接查询知识库索引，
-返回用于下游LLM总结的原始文本块。
+功能介绍：
+-----------
+本模块封装了阿里云百炼（Bailian）知识库检索 API，
+用于从已索引的校园知识文档中检索与用户问题相关的文本块。
+
+主要组件：
+- KnowledgeRetriever: 百炼检索客户端封装类
+- get_retriever(): 返回模块级单例实例
+
+检索流程：
+1. 构建 RetrieveRequest（含 dense/sparse 检索、rerank 重排）
+2. 调用百炼 retrieve_with_options API
+3. 解析响应中的 Nodes/Chunks，拼接为文本块
+4. 返回供下游 LLM 使用的上下文文本
+
+降级处理：
+- API 异常或返回空结果时，返回 "未在知识库中找到相关信息。"
 """
 from __future__ import annotations
 

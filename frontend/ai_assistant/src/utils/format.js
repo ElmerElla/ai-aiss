@@ -1,5 +1,12 @@
 /**
- * 格式化工具函数
+ * 格式化工具函数模块
+ *
+ * 功能介绍：
+ * · formatTime：将时间戳格式化为友好文本（刚刚 / N 分钟前 / N 小时前 / N 天前 / 具体日期）
+ * · formatResponseTime：将毫秒数格式化为响应时间字符串（ms / s）
+ * · truncate：按指定长度截断字符串并追加省略号
+ * · maskStudentId：隐藏学号中间部分，保护隐私
+ * · formatDate：将日期格式化为 YYYY-MM-DD 字符串
  */
 
 /**

@@ -1,7 +1,23 @@
-"""媒体服务：通过 DashScope 将图像和音频输入转换为文本。
+"""
+媒体处理服务模块
 
-图像理解 → dashscope 多模态对话 API (模型由 LLM_MODEL_IMAGE_UNDERSTANDING 配置)
-语音识别 → dashscope ASR API (模型由 LLM_MODEL_SPEECH_RECOGNITION 配置)
+功能介绍：
+-----------
+本模块负责将多模态输入（图像、音频）转换为文本，供后续查询处理使用。
+
+功能列表：
+- image_to_text(): 图像内容理解与 OCR（使用 DashScope 多模态对话 API）
+- audio_to_text(): 语音转文字（使用 DashScope ASR API）
+
+图像处理：
+- 自动调整过大图像尺寸（最长边 1024px）
+- 超大文件自动压缩为 JPEG 格式
+- 统一以 data URL 形式提交给多模态模型
+
+音频处理：
+- 使用 ffmpeg 将任意格式音频转换为 16kHz 单声道 WAV
+- 写入临时文件后调用 ASR 接口
+- 自动清理临时文件
 """
 from __future__ import annotations
 
@@ -21,10 +37,20 @@ dashscope.api_key = settings.ALI_API_KEY
 
 
 def _resize_image_if_needed(image_base64: str, max_size: int = 1024) -> str:
-    """如果需要，调整图像大小以避免 DashScope 的有效载荷过大。
+    """
+    检查并调整图像大小，避免 DashScope API 有效载荷过大。
     
-    如果图像最长边大于 max_size，则进行缩放。
-    同时确保图像转换为 JPEG 格式，如果大小超过 1MB 则减小体积。
+    处理逻辑：
+        - 最长边超过 max_size 时等比例缩放
+        - Base64 超过 1MB 时重新压缩为 JPEG
+        - 处理失败时返回原始内容
+    
+    参数:
+        image_base64: Base64 编码的图像。
+        max_size: 最长边允许的最大像素值。
+    
+    返回:
+        优化后的 Base64 编码图像。
     """
     try:
         image_data = base64.b64decode(image_base64)
@@ -64,13 +90,20 @@ def _resize_image_if_needed(image_base64: str, max_size: int = 1024) -> str:
 
 
 def _convert_audio_to_wav(audio_base64: str) -> bytes:
-    """使用 ffmpeg 直接将音频转换为 WAV 格式。
-
+    """
+    使用 ffmpeg 将任意格式音频转换为标准 WAV 格式。
+    
+    输出规格：WAV 格式、单声道、16000Hz 采样率。
+    通过 subprocess 直接调用 ffmpeg，避免 pydub 等 Python 依赖问题。
+    
     参数:
-        audio_base64: Base64 编码的音频 (WAV / MP3)。
-
+        audio_base64: Base64 编码的音频数据。
+    
     返回:
-        WAV 格式的音频数据。
+        WAV 格式的音频字节数据。
+    
+    异常:
+        RuntimeError: ffmpeg 转换失败。
     """
     try:
         audio_data = base64.b64decode(audio_base64)
@@ -113,13 +146,17 @@ def _convert_audio_to_wav(audio_base64: str) -> bytes:
 
 
 async def image_to_text(image_base64: str) -> str:
-    """使用配置化多模态模型描述 / 提取图像中的文本。
-
+    """
+    使用多模态模型理解图像内容并提取文字。
+    
     参数:
-        image_base64: Base64 编码的图像 (JPEG / PNG)。
-
+        image_base64: Base64 编码的图像（JPEG/PNG）。
+    
     返回:
-        图像内容的自然语言描述。
+        图像内容的自然语言描述文本。
+    
+    异常:
+        RuntimeError: DashScope API 调用失败。
     """
     # 发送前优化图像大小
     logger.info("Image to text start: base64_len={}", len(image_base64))
@@ -157,22 +194,23 @@ async def image_to_text(image_base64: str) -> str:
 
 
 async def audio_to_text(audio_base64: str) -> str:
-    """使用 DashScope ASR (实时语音识别模型) 转录音频。
-
-    实现细节：
-    1. 将 Base64 音频解码并使用 ffmpeg 转换为 16kHz 单声道 WAV 格式。
-    2. 将 WAV 数据写入临时文件。
-    3. 实例化 `Recognition` 对象（模型由 LLM_MODEL_SPEECH_RECOGNITION 配置）。
-    4. 调用 `recognition.call(file_path)` 进行识别。
-
+    """
+    使用 DashScope ASR 将音频转录为文本。
+    
+    实现流程：
+        1. Base64 解码并使用 ffmpeg 转换为 16kHz 单声道 WAV
+        2. 写入临时文件
+        3. 调用 Recognition 接口进行识别
+        4. 清理临时文件
+    
     参数:
-        audio_base64: Base64 编码的音频 (支持 WAV / MP3 等格式，会自动转换)。
-
+        audio_base64: Base64 编码的音频（支持 WAV/MP3 等，自动转换）。
+    
     返回:
         转录后的文本字符串。
-
+    
     异常:
-        RuntimeError: 当音频转换失败或 DashScope API 调用失败/返回错误状态码时抛出。
+        RuntimeError: 音频转换失败、未检测到有效语音内容或 API 调用失败。
     """
     # 将音频转换为 WAV 格式
     logger.info("Audio to text start: base64_len={}", len(audio_base64))

@@ -1,3 +1,24 @@
+"""
+数据模型模块
+
+功能介绍：
+-----------
+本模块使用 SQLAlchemy 2.0 声明式语法定义了 AI 校园助手的所有数据库表结构，
+包括学生、教师、课程、课表、成绩、选课、管理员、对话日志等核心实体。
+
+每个类对应一张数据库表，包含字段定义、约束、索引和关系映射。
+所有模型继承自 app.database.Base。
+
+主要实体：
+- AdminUser / AdminActionLog: 管理员与审计日志
+- Department / Major / Class: 院系、专业、班级
+- Teacher: 教师信息
+- Term: 学期
+- Course / Classroom: 课程与教室
+- Student / Enrollment / Score: 学生、选课、成绩
+- Schedule / ScheduleClassMap / ScheduleAdjustment: 课表及调课
+- ChatLog: 对话日志
+"""
 from __future__ import annotations
 
 import enum
@@ -26,6 +47,7 @@ from app.database import Base
 # 管理员表 (AdminUser) / 管理审计表 (AdminActionLog)
 # ---------------------------------------------------------------------------
 class AdminRoleEnum(str, enum.Enum):
+    """管理员角色枚举。"""
     super_admin = "super_admin"
     scheduler_admin = "scheduler_admin"
     security_admin = "security_admin"
@@ -33,12 +55,14 @@ class AdminRoleEnum(str, enum.Enum):
 
 
 class AdminStatusEnum(str, enum.Enum):
+    """管理员账号状态枚举。"""
     active = "active"
     disabled = "disabled"
     locked = "locked"
 
 
 class AdminUser(Base):
+    """管理员用户表，存储后台管理员的登录凭证、角色和状态信息。"""
     __tablename__ = "admin_user"
 
     admin_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
@@ -84,6 +108,7 @@ class AdminUser(Base):
 
 
 class AdminActionLog(Base):
+    """管理操作审计日志表，记录管理员对课表等数据的关键变更操作。"""
     __tablename__ = "admin_action_log"
 
     action_log_id: Mapped[int] = mapped_column(
@@ -115,6 +140,7 @@ class AdminActionLog(Base):
 # 院系表 (Department)
 # ---------------------------------------------------------------------------
 class Department(Base):
+    """院系表，存储学校下属各学院/系的基本信息。"""
     __tablename__ = "department"
 
     dept_id: Mapped[str] = mapped_column(String(32), primary_key=True)
@@ -132,6 +158,7 @@ class Department(Base):
 # 专业表 (Major)
 # ---------------------------------------------------------------------------
 class Major(Base):
+    """专业表，存储各院系下设的专业信息，与院系一对多关联。"""
     __tablename__ = "major"
 
     major_id: Mapped[str] = mapped_column(String(32), primary_key=True)
@@ -153,6 +180,7 @@ class Major(Base):
 # 班级表 (Class)
 # ---------------------------------------------------------------------------
 class Class(Base):
+    """班级表，存储各年级的班级信息，与专业一对多关联。"""
     __tablename__ = "class"
 
     class_id: Mapped[str] = mapped_column(String(32), primary_key=True)
@@ -178,6 +206,7 @@ class Class(Base):
 # 教师表 (Teacher)
 # ---------------------------------------------------------------------------
 class Teacher(Base):
+    """教师表，存储教师的基本信息、所属院系及联系方式。"""
     __tablename__ = "teacher"
 
     teacher_id: Mapped[str] = mapped_column(String(32), primary_key=True)
@@ -205,6 +234,7 @@ class Teacher(Base):
 # 学期表 (Term)
 # ---------------------------------------------------------------------------
 class Term(Base):
+    """学期表，定义学期的起始和结束日期，用于课表和成绩的时间范围约束。"""
     __tablename__ = "term"
 
     term_id: Mapped[str] = mapped_column(String(32), primary_key=True)
@@ -229,12 +259,14 @@ class Term(Base):
 # 课程表 (Course)
 # ---------------------------------------------------------------------------
 class CourseTypeEnum(str, enum.Enum):
+    """课程类型枚举。"""
     public_required = "公共必修课"
     major_required = "专业必修课"
     major_elective = "专业选修课"
 
 
 class Course(Base):
+    """课程表，存储课程名称、学分和课程类型（必修/选修）。"""
     __tablename__ = "course"
 
     course_id: Mapped[str] = mapped_column(String(32), primary_key=True)
@@ -267,6 +299,7 @@ class Course(Base):
 # 教室表 (Classroom)
 # ---------------------------------------------------------------------------
 class RoomTypeEnum(str, enum.Enum):
+    """教室类型枚举。"""
     normal = "普通教室"
     computer = "计算机机房"
     lab = "实验室"
@@ -275,6 +308,7 @@ class RoomTypeEnum(str, enum.Enum):
 
 
 class Classroom(Base):
+    """教室表，存储教室的位置、类型和容纳人数。"""
     __tablename__ = "classroom"
 
     room_id: Mapped[str] = mapped_column(String(32), primary_key=True)
@@ -303,6 +337,7 @@ class Classroom(Base):
 # 学生表 (Student)
 # ---------------------------------------------------------------------------
 class StudentStatusEnum(str, enum.Enum):
+    """学生学籍状态枚举。"""
     active = "active"
     suspended = "suspended"
     withdrawn = "withdrawn"
@@ -310,6 +345,7 @@ class StudentStatusEnum(str, enum.Enum):
 
 
 class Student(Base):
+    """学生表，存储学生的学籍信息、所属班级及联系方式。"""
     __tablename__ = "student"
 
     student_id: Mapped[str] = mapped_column(String(32), primary_key=True)
@@ -343,6 +379,7 @@ class Student(Base):
 # 选课表 (Enrollment)
 # ---------------------------------------------------------------------------
 class Enrollment(Base):
+    """选课表，记录学生在各学期的选课情况。"""
     __tablename__ = "enrollment"
 
     enrollment_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -370,6 +407,7 @@ class Enrollment(Base):
 # 成绩表 (Score)
 # ---------------------------------------------------------------------------
 class Score(Base):
+    """成绩表，记录学生的课程成绩、学分获得情况及作弊标记。"""
     __tablename__ = "score"
 
     score_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -405,11 +443,13 @@ class Score(Base):
 # 课程安排 (Schedule)
 # ---------------------------------------------------------------------------
 class ScheduleStatusEnum(str, enum.Enum):
+    """课表状态枚举。"""
     active = "active"
     cancelled = "cancelled"
 
 
 class Schedule(Base):
+    """课表表，定义课程的上课时间、地点、教师及班级映射关系。"""
     __tablename__ = "schedule"
 
     schedule_id: Mapped[str] = mapped_column(String(32), primary_key=True)
@@ -483,6 +523,7 @@ class Schedule(Base):
 # 排课-班级映射表 (ScheduleClassMap)
 # ---------------------------------------------------------------------------
 class ScheduleClassMap(Base):
+    """排课与班级的多对多映射表，支持一个课程安排对应多个班级。"""
     __tablename__ = "schedule_class_map"
 
     schedule_id: Mapped[str] = mapped_column(
@@ -517,6 +558,7 @@ class ScheduleClassMap(Base):
 # 调课单表 (ScheduleAdjustment)
 # ---------------------------------------------------------------------------
 class ScheduleAdjustmentOperationEnum(str, enum.Enum):
+    """调课操作类型枚举。"""
     move = "move"
     change_room = "change_room"
     change_teacher = "change_teacher"
@@ -525,6 +567,7 @@ class ScheduleAdjustmentOperationEnum(str, enum.Enum):
 
 
 class ScheduleAdjustmentStatusEnum(str, enum.Enum):
+    """调课单状态枚举。"""
     pending = "pending"
     applied = "applied"
     rejected = "rejected"
@@ -532,6 +575,7 @@ class ScheduleAdjustmentStatusEnum(str, enum.Enum):
 
 
 class ScheduleAdjustment(Base):
+    """调课单表，记录课表调整申请的操作类型、变更前后信息及审批状态。"""
     __tablename__ = "schedule_adjustment"
 
     adjustment_id: Mapped[int] = mapped_column(
@@ -626,12 +670,14 @@ class ScheduleAdjustment(Base):
 # 对话日志 (ChatLog)
 # ---------------------------------------------------------------------------
 class SenderEnum(str, enum.Enum):
+    """对话消息发送者类型枚举。"""
     student = "student"
     agent = "agent"
     system = "system"
 
 
 class SystemActionEnum(str, enum.Enum):
+    """系统对消息采取的干预动作枚举。"""
     none = "none"
     flag_danger = "flag_danger"
     report = "report"
@@ -639,6 +685,7 @@ class SystemActionEnum(str, enum.Enum):
 
 
 class ChatLog(Base):
+    """对话日志表，持久化存储学生与 AI 助手的问答记录，支持隐私脱敏。"""
     __tablename__ = "chat_log"
 
     log_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)

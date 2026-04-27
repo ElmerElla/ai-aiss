@@ -1,9 +1,21 @@
-"""意图分类与回答生成服务（LangChain 重构版）。
+"""
+意图分类与回答生成服务模块
 
-将用户查询分类为：
-- ``structured``：结构化数据查询（SQL）
-- ``vector``：知识库向量检索
-- ``hybrid``：混合查询
+功能介绍：
+-----------
+本模块是 AI 校园助手核心 NLP 服务层，负责：
+1. 意图分类：将用户查询分类为 structured / vector / hybrid / smalltalk
+2. 查询重写：结合历史上下文补全缺失信息（如指代消解）
+3. 回答生成：基于查询结果上下文生成自然语言回答（支持流式输出）
+
+使用模型：
+- 意图分类：LLM_MODEL_INTENT_CLASSIFY（默认 qwen-turbo）
+- 查询重写：LLM_MODEL_QUERY_REWRITE（默认 qwen-turbo）
+- 回答生成：LLM_MODEL_FINAL_ANSWER（默认 qwen-plus）
+
+安全与约束：
+- 输入超长时自动截断（历史/问题/上下文分别设有最大长度限制）
+- 回答规范严格约束：禁用技术字段名、隐私保护、日期推算准确等
 """
 from __future__ import annotations
 
@@ -67,6 +79,23 @@ _MAX_SUMMARY_HISTORY_ITEM_CHARS = 1200
 _MAX_SUMMARY_QUERY_CHARS = 1200
 _MAX_SUMMARY_CONTEXT_CHARS = 18000
 
+_SUGGEST_QUESTIONS_PROMPT = ChatPromptTemplate.from_messages(
+    [
+        (
+            "system",
+            "你是一个贴心的校园智能助手。根据用户上传的图片内容，生成3-5个用户可能接着会问的推荐问题。\n"
+            "要求：\n"
+            "1. 推荐问题必须与图片内容直接相关，帮助用户深入了解图片主题。\n"
+            "2. 问题风格自然，像学生真实会问的口吻。\n"
+            "3. 如果图片是课表/课程安排类：推荐查询具体某天的课、某门课详情、上课时间地点、空课时间等问题。\n"
+            "4. 如果图片是学生手册/规章制度类：推荐询问申请条件、评选流程、材料要求、时间节点、相关规则细节等问题。\n"
+            "5. 每个问题单独一行，不要加序号、不要解释、不要空行。\n"
+            "6. 最多输出5个问题，最少3个。",
+        ),
+        ("user", "图片内容：\n{img_text}\n\n请生成推荐问题。"),
+    ]
+)
+
 
 def _build_summary_prompt(current_date_str: str) -> ChatPromptTemplate:
     return ChatPromptTemplate.from_messages(
@@ -91,7 +120,7 @@ def _build_summary_prompt(current_date_str: str) -> ChatPromptTemplate:
                 "12. 课表回答必须以本次相关数据为唯一事实来源，历史消息只可用于指代消解，不可覆盖本次数据结论。\n"
                 "13. 当结构化判定包含\"人员联系方式判定：在教师通讯录匹配到...\"时，应提供该教师的公开联系方式（电话/邮箱/办公室等）。\\n"
                 "14. 当结构化判定包含\"人员联系方式判定：未在教师通讯录匹配到...\"时，必须明确说明无法查询其他同学/学生的个人联系方式，并给出合规建议（班级群、课程群、辅导员转达）。\\n"
-                "15. 当问题涉及图片内容时，严格遵守【回答要求】中的指令：学术/技术类图片直接回答不要额外推荐；无关图片简短回复后可自然提醒关注校园活动。\\n"
+                "15. 当问题涉及图片内容时，严格遵守【回答要求】中的指令：学术/技术类直接回答不要额外推荐；课表/教务信息图片进行相对应的查询，并结合返回结果给出建议；无关图片简短回复后可自然提醒关注校园活动。\\n"
                 "16. 当结构化判定包含\"停课判定\"时，必须明确告知用户哪些课程已停课（无需上课），严禁将停课课程按正常课程输出时间地点。若用户询问明天/某天的课表，停了的课不应列入\"有课\"列表，但可单独说明\"XX课程已停课\"以免学生误解。\\n"
                 "17. 严禁出现‘系统标记为’‘系统标明’等内部说明话术，严禁输出 cancelled、active、schedule_status 等内部状态值或技术字段名，统一使用‘已停课’‘正常’等中文自然语言。\n"
                 "18. 课表时间必须严格按以下节次映射输出，禁止自行推算或凭记忆输出错误时间：\n"
@@ -111,6 +140,11 @@ def _build_summary_prompt(current_date_str: str) -> ChatPromptTemplate:
 
 
 def _to_langchain_history(history: list[ChatLog] | None, limit: int | None = None) -> list[tuple[str, str]]:
+    """
+    将内部 ChatLog 列表转换为 LangChain 兼容的历史消息格式。
+    
+    返回 (role, content) 元组列表，role 为 "human" 或 "ai"。
+    """
     if not history:
         return []
 
@@ -123,6 +157,11 @@ def _to_langchain_history(history: list[ChatLog] | None, limit: int | None = Non
 
 
 def _truncate_tail(text: str, max_chars: int, *, label: str) -> tuple[str, bool]:
+    """
+    截断文本尾部并附加说明标记。
+    
+    返回 (截断后文本, 是否发生了截断)。
+    """
     if max_chars <= 0:
         return "", bool(text)
     if len(text) <= max_chars:
@@ -143,6 +182,12 @@ def _truncate_tail(text: str, max_chars: int, *, label: str) -> tuple[str, bool]
 
 
 def _truncate_middle(text: str, max_chars: int, *, label: str) -> tuple[str, bool]:
+    """
+    截断文本中间部分并保留头尾，附加说明标记。
+    
+    适用于结构化上下文，减少关键信息丢失。
+    返回 (截断后文本, 是否发生了截断)。
+    """
     if max_chars <= 0:
         return "", bool(text)
     if len(text) <= max_chars:
@@ -174,6 +219,12 @@ def _build_summary_payload(
     context: str,
     history: list[ChatLog] | None,
 ) -> dict[str, Any]:
+    """
+    构建回答生成所需的输入载荷。
+    
+    对历史消息、问题和上下文分别进行长度截断，记录截断日志。
+    返回符合总结 Prompt 模板要求的字典。
+    """
     raw_history = _to_langchain_history(history, limit=_MAX_SUMMARY_HISTORY_COUNT)
     payload_history: list[tuple[str, str]] = []
     trimmed_history_items = 0
@@ -219,13 +270,19 @@ def _build_summary_payload(
 
 
 def _current_date_text() -> str:
+    """返回当前系统日期的中文格式化字符串（含星期）。"""
     today = date.today()
     weekdays = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
     return f"{today.year}年{today.month}月{today.day}日 {weekdays[today.weekday()]}"
 
 
 async def classify_intent(query: str) -> IntentType:
-    """分类用户查询意图。"""
+    """
+    分类用户查询意图。
+    
+    使用配置的 LLM 模型对查询进行分类，返回 structured / vector / hybrid / smalltalk 之一。
+    若分类失败则降级返回 vector。
+    """
     logger.info("Intent classification start: query_len={}", len(query))
 
     async def _invoke_classifier(text: str) -> str:
@@ -258,7 +315,12 @@ async def classify_intent(query: str) -> IntentType:
 
 
 async def rewrite_query_with_context(query: str, history: list[ChatLog]) -> str:
-    """结合历史上下文重写用户查询，使其补足缺失信息。"""
+    """
+    结合历史上下文重写用户查询。
+    
+    将代词、省略语补全为独立完整的查询句，使后续处理不依赖历史。
+    若重写失败则返回原查询。
+    """
     if not history:
         logger.debug("Rewrite skipped: no history")
         return query
@@ -307,7 +369,14 @@ async def rewrite_query_with_context(query: str, history: list[ChatLog]) -> str:
 async def summarize_answer(
     query: str, context: str, history: list[ChatLog] | None = None
 ) -> str:
-    """根据上下文数据生成用户友好的回答。"""
+    """
+    根据上下文数据生成用户友好的自然语言回答（非流式）。
+    
+    参数:
+        query: 用户原始查询。
+        context: 结构化查询结果和/或知识库检索结果。
+        history: 可选的历史对话记录。
+    """
     logger.info(
         "Summarize start: query_len={}, context_len={}, history_count={}",
         len(query),
@@ -335,7 +404,11 @@ async def summarize_answer(
 def summarize_answer_stream(
     query: str, context: str, history: list[ChatLog] | None = None
 ):
-    """根据上下文数据生成用户友好的回答 (流式输出)。"""
+    """
+    根据上下文数据生成用户友好的自然语言回答（流式输出）。
+    
+    返回生成器，逐字符/逐词产出回答内容，供 SSE 流式传输使用。
+    """
     logger.info(
         "Summarize stream start: query_len={}, context_len={}, history_count={}",
         len(query),
@@ -352,3 +425,44 @@ def summarize_answer_stream(
         temperature=0.2,
         max_tokens=4096,
     )
+
+
+async def generate_suggested_questions(img_text: str) -> list[str]:
+    """
+    根据图片 OCR 文本生成用户可能接着会问的推荐问题。
+
+    用于图片问答场景，在解释完图片内容后向用户推荐后续问题。
+    """
+    if not img_text or len(img_text.strip()) < 10:
+        return []
+
+    logger.info("Suggest questions start: img_text_len={}", len(img_text))
+
+    async def _invoke_suggester(data: dict[str, Any]) -> str:
+        return await ainvoke_chat_prompt(
+            _SUGGEST_QUESTIONS_PROMPT,
+            data,
+            model=settings.LLM_MODEL_QUERY_REWRITE,
+            temperature=0.7,
+            max_tokens=256,
+        )
+
+    chain = RunnableLambda(_invoke_suggester) | StrOutputParser()
+
+    try:
+        raw = (await chain.ainvoke({"img_text": img_text})).strip()
+        questions = [
+            line.strip("-* 1234567890.\t")
+            for line in raw.split("\n")
+            if line.strip()
+        ]
+        questions = [q for q in questions if len(q) >= 5 and len(q) <= 80]
+        logger.info("Suggest questions completed: count={}", len(questions))
+        return questions[:5]
+    except Exception as exc:
+        logger.warning(
+            "Suggest questions generation failed: {}: {}",
+            exc.__class__.__name__,
+            str(exc)[:240],
+        )
+        return []

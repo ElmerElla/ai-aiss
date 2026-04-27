@@ -1,7 +1,19 @@
 /**
- * 管理员 Axios 实例
- * · 请求拦截：自动附加管理员 JWT
- * · 响应拦截：401 自动清理管理员状态并跳转管理员登录页
+ * Axios HTTP 客户端实例（管理员端）
+ *
+ * 功能介绍：
+ * -----------
+ * 本模块创建并导出一个配置好的 Axios 实例，用于管理员后台所有 API 请求。
+ *
+ * 与学生端 http.js 的区别：
+ * - 使用独立的 localStorage 键名（campus_ai_admin_token）
+ * - 401 时跳转至管理员登录页（AdminLogin）
+ * - 清理管理员认证状态（adminAuthStore.logout）
+ *
+ * 基础配置：
+ * - baseURL: /api/v1
+ * - timeout: 60000ms
+ * - Content-Type: application/json
  */
 import axios from 'axios'
 import router from '@/router'

@@ -1,8 +1,18 @@
-"""AES-CBC 密码解密工具。
+"""
+AES-CBC 密码解密工具模块
 
-前端使用 CryptoJS AES-CBC 加密明文密码后传输。
-加密格式：iv_base64:ciphertext_base64（带 URL 安全编码）
-此模块使用配置中的共享密钥解密密码。
+功能介绍：
+-----------
+本模块提供后端 AES-CBC 解密功能，用于解密前端传输的加密密码。
+
+加密格式：
+    iv_base64:ciphertext_base64（URL-Safe Base64 编码）
+
+前端使用 CryptoJS 进行 AES-CBC 加密，后端使用 pycryptodome 解密。
+密钥长度支持 16/24/32 字节（对应 AES-128/192/256）。
+
+主要函数：
+- decrypt_password(): 解密前端传来的加密密码字符串
 """
 from __future__ import annotations
 
@@ -15,7 +25,7 @@ from app.config import settings
 
 
 def _load_key() -> bytes:
-    """从设置中加载 AES 密钥（UTF-8 字符串，16/24/32 字符）。"""
+    """从应用配置加载 AES 密钥并编码为字节，校验长度是否为 16/24/32 字节。"""
     key = settings.AES_SECRET_KEY
     if len(key) not in (16, 24, 32):
         raise ValueError(f"AES 密钥长度必须为 16/24/32 字符，当前: {len(key)}")
@@ -23,9 +33,13 @@ def _load_key() -> bytes:
 
 
 def _url_safe_base64_decode(data: str) -> bytes:
-    """解码 URL 安全的 Base64 字符串。
+    """
+    解码 URL 安全的 Base64 字符串。
     
-    前端将 +/-/= 替换为 -/_/空，这里还原并解码。
+    还原规则：
+        - 将 '-' 还原为 '+'
+        - 将 '_' 还原为 '/'
+        - 补齐 Base64 填充符 '='
     """
     # 还原 URL 安全编码
     data = data.replace("-", "+").replace("_", "/")
@@ -37,17 +51,17 @@ def _url_safe_base64_decode(data: str) -> bytes:
 
 
 def decrypt_password(encrypted_data: str) -> str:
-    """解密 AES-CBC 加密、PKCS7 填充的密码。
+    """
+    解密前端传来的 AES-CBC 加密密码。
 
-    参数：
-        encrypted_data: 前端加密生成的字符串，格式为 iv_base64:ciphertext_base64
-                        （带 URL 安全编码）
+    参数:
+        encrypted_data: 前端加密字符串，格式为 iv_base64:ciphertext_base64。
 
-    返回：
+    返回:
         明文密码字符串（UTF-8）。
 
-    异常：
-        ValueError: 如果解密或去填充失败（无效的密文）。
+    异常:
+        ValueError: 格式无效或解密失败。
     """
     try:
         if ":" not in encrypted_data:

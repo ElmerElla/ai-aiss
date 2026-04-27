@@ -56,6 +56,17 @@
   </div>
 </template>
 
+/**
+ * 管理员登录视图组件
+ *
+ * 功能介绍：
+ * · 提供管理员后台登录界面（用户名 + 密码）
+ * · 密码支持显示/隐藏切换
+ * · 登录时调用 adminAuthStore.login（内部自动 AES-CBC 加密密码）
+ * · 登录成功后自动跳转至 AdminDashboard 仪表盘
+ * · 错误处理：401 用户名或密码错误，403 账号被禁用
+ * · 提供返回学生登录入口链接
+ */
 <script setup>
 import { reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
@@ -72,6 +83,11 @@ const showPassword = ref(false)
 const isSubmitting = ref(false)
 const errorMsg = ref('')
 
+/**
+ * 处理管理员登录表单提交
+ * 前端校验用户名与密码非空后调用 Pinia adminAuthStore 登录
+ * 错误处理：401 显示用户名或密码错误，403 显示账号不可用
+ */
 async function handleLogin() {
   errorMsg.value = ''
 

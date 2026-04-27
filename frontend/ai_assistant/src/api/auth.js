@@ -1,7 +1,16 @@
 /**
- * 认证相关 API
- * 对应后端: POST /api/v1/auth/login
- *           POST /api/v1/auth/change-password
+ * 学生认证 API 模块
+ *
+ * 功能介绍：
+ * -----------
+ * 本模块封装了学生认证相关的后端接口调用。
+ *
+ * 接口列表：
+ * - POST /auth/login          → 学生登录
+ * - POST /auth/change-password → 修改密码
+ *
+ * 密码传输安全：
+ * 前端通过 AES-CBC 加密密码后传输，格式为 iv_base64:ciphertext_base64
  */
 import http from './http'
 

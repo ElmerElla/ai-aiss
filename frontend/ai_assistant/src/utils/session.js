@@ -1,9 +1,17 @@
 /**
- * 会话 & 设备标识管理工具
+ * 会话 & 设备标识管理工具模块
  *
- * · session_id: 每个对话一个，格式 sess_<uuid>
- * · did (设备ID): 首次生成后持久化，格式 did_<uuid>
- * · 会话列表通过 localStorage 持久化
+ * 功能介绍：
+ * · generateSessionId：生成新的会话唯一标识（格式 sess_<uuid>）
+ * · getDeviceId：获取设备唯一标识（首次自动生成 did_<uuid> 并持久化到 localStorage）
+ * · getAllSessions：从 localStorage 读取所有会话列表
+ * · saveSessions：将会话列表持久化到 localStorage
+ * · getActiveSessionId / setActiveSessionId：读写当前活跃会话 ID
+ *
+ * 存储键：
+ * · campus_ai_sessions —— 会话列表 JSON
+ * · campus_ai_active_session —— 当前活跃会话 ID
+ * · campus_ai_did —— 设备唯一标识
  */
 import { v4 as uuidv4 } from 'uuid'
 

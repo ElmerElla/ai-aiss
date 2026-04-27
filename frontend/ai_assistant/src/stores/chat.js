@@ -1,11 +1,16 @@
 /**
- * 聊天状态管理
+ * 聊天状态管理 (Pinia Store)
  *
- * · 会话 CRUD（创建 / 切换 / 删除 / 清空）
- * · 消息发送（自动附加 session_id）
- * · 消息删除
- * · 搜索过滤
- * · localStorage 持久化
+ * 功能介绍：
+ * · 管理多会话聊天状态（创建 / 切换 / 删除 / 清空会话）
+ * · 消息发送（支持文本、图片、语音多模态输入，自动附加 session_id 与 did）
+ * · 消息删除（支持单条消息移除）
+ * · 搜索过滤（按会话标题或消息内容关键词过滤）
+ * · localStorage 持久化（会话列表与活跃会话 ID 自动同步到本地存储）
+ * · 流式响应处理（接收 SSE chunk 并实时更新助手消息内容）
+ * · 错误处理（将 HTTP 错误转换为友好提示消息展示在聊天界面）
+ *
+ * 会话结构：{ id, title, createdAt, updatedAt, messages: [{ id, role, content, image_base64, audio_base64, audioDuration, isPlaying, timestamp, cached, response_time_ms, did, isError }] }
  */
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
@@ -193,6 +198,9 @@ export const useChatStore = defineStore('chat', () => {
             assistantMsg.response_time_ms = data.response_time_ms
             assistantMsg.cached = data.cached
             if (data.answer) assistantMsg.content = data.answer // just in case it's a full return
+            if (data.suggested_questions && Array.isArray(data.suggested_questions)) {
+              assistantMsg.suggested_questions = data.suggested_questions
+            }
             session.updatedAt = new Date().toISOString()
             persist()
             loadingStates.value[session.id] = false

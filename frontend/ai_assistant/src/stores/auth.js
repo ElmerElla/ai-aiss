@@ -1,9 +1,14 @@
 /**
- * 认证状态管理
+ * 学生认证状态管理 (Pinia Store)
  *
- * · 登录 → 加密密码 → 请求后端 → 存储 JWT Token
- * · 修改密码 → 加密旧密码 & 新密码 → 请求后端
- * · 登出 → 清除所有本地认证信息
+ * 功能介绍：
+ * · 管理学生端的登录状态（JWT Token、学号、过期时间）
+ * · 登录时通过 AES-CBC 加密密码后发送至后端
+ * · 修改密码时同步加密旧密码与新密码
+ * · 登出时清除 localStorage 与内存中的认证信息
+ * · 提供 isAuthenticated 计算属性自动判断 Token 是否有效
+ *
+ * 存储键：campus_ai_token / campus_ai_student_id / campus_ai_expires_at
  */
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
@@ -21,11 +26,21 @@ export const useAuthStore = defineStore('auth', () => {
   const expiresAt = ref(Number(localStorage.getItem(EXPIRES_KEY)) || 0)
 
   // ---- 计算属性 ----
+  /**
+   * 判断当前学生是否已登录且 Token 未过期
+   * @returns {boolean}
+   */
   const isAuthenticated = computed(() => {
     return !!token.value && Date.now() < expiresAt.value
   })
 
   // ---- 登录 ----
+  /**
+   * 学生登录
+   * @param {string} studentIdInput 学号
+   * @param {string} password 明文密码（内部自动 AES-CBC 加密）
+   * @returns {Promise<Object>} 后端登录响应数据 { access_token, token_type, expires_in, student_id }
+   */
   async function login(studentIdInput, password) {
     const encrypted = encryptPassword(password)
     const { data } = await authApi.login(studentIdInput, encrypted)
@@ -43,6 +58,12 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   // ---- 修改密码 ----
+  /**
+   * 修改当前学生密码
+   * @param {string} oldPassword 当前明文密码
+   * @param {string} newPassword 新明文密码
+   * @returns {Promise<Object>} 后端响应 { success, student_id, detail }
+   */
   async function changePassword(oldPassword, newPassword) {
     const encryptedOld = encryptPassword(oldPassword)
     const encryptedNew = encryptPassword(newPassword)
@@ -56,6 +77,10 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   // ---- 登出 ----
+  /**
+   * 登出并清除所有本地认证状态
+   * 会同步清空 Pinia state 与 localStorage 中的 Token、学号、过期时间
+   */
   function logout() {
     token.value = ''
     studentId.value = ''

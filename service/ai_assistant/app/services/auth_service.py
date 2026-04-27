@@ -1,4 +1,23 @@
-"""认证服务：JWT创建/验证，登录验证。"""
+"""
+认证服务模块
+
+功能介绍：
+-----------
+本模块提供用户认证相关的核心服务，包括 JWT 令牌的创建与验证、
+学生和管理员的登录认证、以及密码修改功能。
+
+主要功能：
+- create_access_token() / decode_access_token(): 学生 JWT 的创建与验证
+- create_admin_access_token() / decode_admin_access_token(): 管理员 JWT 的创建与验证
+- authenticate_student(): 学生登录认证（AES 解密 + SHA256 哈希验证）
+- authenticate_admin(): 管理员登录认证
+- change_password(): 学生密码修改
+
+密码安全：
+- 前端传输 AES-CBC 加密密码
+- 数据库存储 SHA256 哈希值
+- 兼容纯 SHA256 和 sha256$ 前缀格式
+"""
 from __future__ import annotations
 
 import hashlib
@@ -27,7 +46,14 @@ class PasswordChangeError(Exception):
 
 
 def _verify_password_hash(plaintext: str, stored_hash: str) -> bool:
-    """验证明文与数据库密码哈希。兼容纯 SHA256 与 `sha256$` 前缀格式。"""
+    """
+    验证明文密码与数据库中存储的密码哈希是否匹配。
+    
+    兼容格式：
+        - 纯 SHA256 十六进制字符串
+        - sha256$ 前缀格式
+        - 明文（仅用于开发环境兼容）
+    """
     if not stored_hash:
         return False
 
@@ -43,9 +69,13 @@ def _verify_password_hash(plaintext: str, stored_hash: str) -> bool:
 
 
 def create_access_token(student_id: str) -> tuple[str, int]:
-    """创建签名的 JWT 访问令牌。
-
-    返回：
+    """
+    创建学生 JWT 访问令牌。
+    
+    参数:
+        student_id: 学生学号。
+    
+    返回:
         (令牌字符串, 过期时间（秒）)
     """
     expire = datetime.now(timezone.utc) + timedelta(minutes=_EXPIRE_MINUTES)
@@ -61,7 +91,16 @@ def create_access_token(student_id: str) -> tuple[str, int]:
 
 
 def create_admin_access_token(admin_id: int, username: str) -> tuple[str, int]:
-    """创建管理员 JWT 访问令牌。"""
+    """
+    创建管理员 JWT 访问令牌。
+    
+    参数:
+        admin_id: 管理员唯一标识。
+        username: 管理员用户名。
+    
+    返回:
+        (令牌字符串, 过期时间（秒）)
+    """
     expire = datetime.now(timezone.utc) + timedelta(minutes=_EXPIRE_MINUTES)
     payload = {
         "sub": str(admin_id),
@@ -76,10 +115,17 @@ def create_admin_access_token(admin_id: int, username: str) -> tuple[str, int]:
 
 
 def decode_access_token(token: str) -> str:
-    """解码并验证 JWT。成功时返回 student_id。
-
-    异常：
-        JWTError: 如果令牌无效或已过期。
+    """
+    解码并验证学生 JWT 令牌。
+    
+    参数:
+        token: JWT 字符串。
+    
+    返回:
+        学生学号。
+    
+    异常:
+        JWTError: 令牌无效、已过期或角色不匹配。
     """
     payload = jwt.decode(token, _SECRET, algorithms=[_ALGORITHM])
     role: str | None = payload.get("role")
@@ -90,13 +136,24 @@ def decode_access_token(token: str) -> str:
     student_id: str | None = payload.get("sub")
     if not student_id:
         logger.warning("Token decode failed: subject missing")
-        raise JWTError("缺少主题声明")
+        raise JWTError("缺少声明")
     logger.debug("Token decoded: student_id={}", student_id)
     return student_id
 
 
 def decode_admin_access_token(token: str) -> dict[str, str | int]:
-    """解码管理员 JWT。成功返回 admin_id 与 username。"""
+    """
+    解码并验证管理员 JWT 令牌。
+    
+    参数:
+        token: JWT 字符串。
+    
+    返回:
+        包含 admin_id 和 username 的字典。
+    
+    异常:
+        JWTError: 令牌无效、已过期或角色不匹配。
+    """
     payload = jwt.decode(token, _SECRET, algorithms=[_ALGORITHM])
     role: str | None = payload.get("role")
     if role != "admin":
@@ -125,23 +182,24 @@ def decode_admin_access_token(token: str) -> dict[str, str | int]:
 async def authenticate_student(
     db: AsyncSession, student_id: str, encrypted_password: str
 ) -> Student:
-    """验证学生身份。
+    """
+    验证学生身份（登录认证）。
 
-    过程：
-    1. 查找学生记录。
-    2. 解密前端传入的 AES 密码。
-    3. 验证 SHA256 哈希。
+    认证流程：
+        1. 查找学生记录
+        2. 解密前端传入的 AES 加密密码
+        3. 验证 SHA256 密码哈希
 
     参数:
         db: 数据库会话。
         student_id: 学生学号。
-        encrypted_password: AES 加密的密码密文。
+        encrypted_password: AES 加密的密码密文（iv_base64:ciphertext_base64）。
 
     返回:
-        认证成功的学生对象。
+        认证成功的 Student 对象。
 
     异常:
-        ValueError: 用户名或密码错误。
+        ValueError: 学号不存在或密码错误。
     """
     # 1. 查找学生
     logger.info("Authenticate start: student_id={}", student_id)
@@ -176,7 +234,22 @@ async def change_password(
     encrypted_old_password: str,
     encrypted_new_password: str,
 ) -> None:
-    """更新指定学生的密码，需验证旧口令。"""
+    """
+    更新指定学生的密码。
+    
+    安全校验：
+        - 验证旧密码正确性
+        - 新密码不能与旧密码相同
+    
+    参数:
+        db: 数据库会话。
+        student_id: 学生学号。
+        encrypted_old_password: AES 加密的旧密码。
+        encrypted_new_password: AES 加密的新密码。
+    
+    异常:
+        PasswordChangeError: 学生不存在、旧密码错误或新密码未变更。
+    """
 
     result = await db.execute(
         select(Student).where(Student.student_id == student_id)
@@ -214,7 +287,21 @@ async def authenticate_admin(
     username: str,
     encrypted_password: str,
 ) -> AdminUser:
-    """验证管理员账号。"""
+    """
+    验证管理员身份（登录认证）。
+    
+    参数:
+        db: 数据库会话。
+        username: 管理员用户名。
+        encrypted_password: AES 加密的密码密文。
+    
+    返回:
+        认证成功的 AdminUser 对象。
+    
+    异常:
+        ValueError: 用户名或密码错误。
+        PermissionError: 管理员账号非 active 状态。
+    """
     normalized = (username or "").strip()
     logger.info("Admin authenticate start: username={}", normalized)
 

@@ -1,8 +1,12 @@
 /**
- * AES-CBC 加密工具
+ * AES-CBC 加密工具模块
  *
- * 加密格式与后端一致: iv_base64:ciphertext_base64
- * 使用 URL-Safe Base64 编码
+ * 功能介绍：
+ * · 提供前端密码加密能力，使用 AES-CBC 模式与后端保持一致的加密格式
+ * · 加密结果格式: iv_base64:ciphertext_base64（URL-Safe Base64 编码）
+ * · 密钥从环境变量 VITE_AES_SECRET_KEY 读取，默认值为开发占位密钥
+ *
+ * 注意：生产环境必须在 .env 文件中配置真实的 16 字节长度密钥
  */
 import CryptoJS from 'crypto-js'
 

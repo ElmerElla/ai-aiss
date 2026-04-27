@@ -133,6 +133,18 @@
   </div>
 </template>
 
+/**
+ * 修改密码视图组件
+ *
+ * 功能介绍：
+ * · 提供学生修改密码的表单界面（当前密码、新密码、确认密码）
+ * · 密码支持显示/隐藏切换
+ * · 实时计算并展示密码强度（弱 / 中等 / 强）
+ * · 实时校验密码规则（长度、大写字母、数字、特殊字符）
+ * · 实时校验两次输入的新密码是否一致
+ * · 提交时调用 authStore.changePassword（内部自动 AES-CBC 加密）
+ * · 错误处理：400 旧密码错误/新旧相同/加密无效，403 无权修改，404 学生不存在
+ */
 <script setup>
 import { ref, reactive, computed } from 'vue'
 import { useAuthStore } from '@/stores/auth'
@@ -152,6 +164,11 @@ const errorMsg = ref('')
 const successMsg = ref('')
 
 // ---- 表单验证 ----
+/**
+ * 判断表单是否通过基础校验
+ * 条件：旧密码非空、新密码至少 6 位、两次输入一致
+ * @returns {boolean}
+ */
 const isFormValid = computed(() => {
   return (
     form.oldPassword.length > 0 &&
@@ -161,6 +178,11 @@ const isFormValid = computed(() => {
 })
 
 // ---- 密码强度计算 ----
+/**
+ * 计算新密码强度得分（0-5）
+ * 评分维度：长度 >=6、长度 >=10、包含大写字母、包含数字、包含特殊字符
+ * @returns {number}
+ */
 const strengthScore = computed(() => {
   const pwd = form.newPassword
   if (!pwd) return 0
@@ -173,14 +195,26 @@ const strengthScore = computed(() => {
   return score
 })
 
+/**
+ * 密码强度百分比（用于进度条宽度）
+ * @returns {number}
+ */
 const strengthPercent = computed(() => (strengthScore.value / 5) * 100)
 
+/**
+ * 根据强度得分返回 CSS 类名
+ * @returns {string} 'weak' | 'medium' | 'strong'
+ */
 const strengthClass = computed(() => {
   if (strengthScore.value <= 1) return 'weak'
   if (strengthScore.value <= 3) return 'medium'
   return 'strong'
 })
 
+/**
+ * 根据强度得分返回中文描述
+ * @returns {string}
+ */
 const strengthText = computed(() => {
   if (strengthScore.value <= 1) return '弱'
   if (strengthScore.value <= 3) return '中等'
@@ -188,6 +222,11 @@ const strengthText = computed(() => {
 })
 
 // ---- 提交 ----
+/**
+ * 处理修改密码表单提交
+ * 校验通过后调用 authStore.changePassword 发送加密后的密码
+ * 成功时清空表单并显示成功提示，失败时根据状态码解析错误信息
+ */
 async function handleSubmit() {
   errorMsg.value = ''
   successMsg.value = ''

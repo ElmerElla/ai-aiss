@@ -133,6 +133,24 @@
                   🗑
                 </button>
               </div>
+
+              <!-- 推荐问题 -->
+              <div
+                v-if="msg.role === 'assistant' && msg.suggested_questions && msg.suggested_questions.length > 0 && !chatStore.loading"
+                class="suggested-questions"
+              >
+                <div class="suggested-label">💡 你可能还想问：</div>
+                <div class="suggested-list">
+                  <button
+                    v-for="(q, idx) in msg.suggested_questions"
+                    :key="idx"
+                    class="suggested-chip"
+                    @click="fillInput(q)"
+                  >
+                    {{ q }}
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         </TransitionGroup>
@@ -216,6 +234,20 @@
   </div>
 </template>
 
+/**
+ * 智能问答聊天视图组件（核心页面）
+ *
+ * 功能介绍：
+ * · 提供多模态聊天界面（支持文本、图片上传、语音录制与播放）
+ * · 欢迎界面展示示例问题与快捷操作按钮
+ * · 消息列表支持 Markdown 渲染、代码高亮、表格、引用块
+ * · 消息元信息展示（发送时间、缓存标记、响应时间、设备标识 DID）
+ * · 流式响应渲染（SSE chunk 实时更新助手消息内容，带打字机动画）
+ * · 图片上传与前端压缩（>800KB 自动压缩为 JPEG 0.7 质量）
+ * · 语音录制（MediaRecorder API）与播放控制
+ * · 自动滚动到底部、textarea 自适应高度
+ * · 消息删除功能
+ */
 <script setup>
 import { ref, nextTick, watch, onMounted } from 'vue'
 import { useChatStore } from '@/stores/chat'
@@ -261,6 +293,12 @@ marked.setOptions({
   gfm: true
 })
 
+/**
+ * 将 Markdown 文本渲染为 HTML
+ * 异常时回退为简单换行转 HTML 换行符
+ * @param {string} content 原始 Markdown 内容
+ * @returns {string} 渲染后的 HTML 字符串
+ */
 function renderContent(content) {
   if (!content) return ''
   try {
@@ -271,6 +309,9 @@ function renderContent(content) {
 }
 
 // ---- textarea 自适应高度 ----
+/**
+ * 根据内容自动调整 textarea 高度（最大 160px）
+ */
 function autoResize() {
   const el = textareaRef.value
   if (!el) return
@@ -279,6 +320,10 @@ function autoResize() {
 }
 
 // ---- 滚动到底部 ----
+/**
+ * 平滑滚动消息列表到底部
+ * 使用 nextTick 确保 DOM 更新后执行
+ */
 function scrollToBottom() {
   nextTick(() => {
     bottomAnchor.value?.scrollIntoView({ behavior: 'smooth' })
@@ -286,6 +331,11 @@ function scrollToBottom() {
 }
 
 // ---- 填充输入框 ----
+/**
+ * 将示例文本或快捷操作提示填充到输入框
+ * 自动触发 textarea 自适应高度并聚焦
+ * @param {string} text 要填充的文本
+ */
 function fillInput(text) {
   inputText.value = text
   nextTick(() => {
@@ -295,6 +345,11 @@ function fillInput(text) {
 }
 
 // ---- 发送消息 ----
+/**
+ * 处理发送消息（文本 + 可选图片）
+ * 清空输入区后调用 chatStore.sendMessage 发起 SSE 流式请求
+ * 自动滚动到底部展示最新消息
+ */
 async function handleSend() {
   const text = inputText.value.trim()
   if (!text && !imageBase64.value) return
@@ -319,6 +374,13 @@ async function handleSend() {
 }
 
 // ---- 图片上传 ----
+/**
+ * 处理图片上传事件
+ * · 限制单张图片 5MB
+ * · 小于 800KB 的图片直接使用，否则通过 Canvas 压缩为 JPEG 0.7 质量
+ * · 限制最大尺寸 1024px
+ * @param {Event} e 文件选择 change 事件
+ */
 function handleImageUpload(e) {
   const file = e.target.files?.[0]
   if (!file) return
@@ -375,6 +437,9 @@ function handleImageUpload(e) {
   e.target.value = ''
 }
 
+/**
+ * 清除当前已选图片的预览与 Base64 数据
+ */
 function clearImage() {
   imageBase64.value = null
   imagePreview.value = null
@@ -383,6 +448,12 @@ function clearImage() {
 // ---- 语音输入 ----
 let recordingStartTime = 0
 
+/**
+ * 开始语音录制
+ * · 请求麦克风权限并启动 MediaRecorder
+ * · 录音停止后校验时长（>1秒）与文件大小（>500B）
+ * · 将音频转换为 Base64 后通过 chatStore.sendMessage 发送
+ */
 async function startRecording() {
   if (chatStore.loading) return
   try {
@@ -449,6 +520,10 @@ async function startRecording() {
   }
 }
 
+/**
+ * 停止当前录音
+ * 触发 MediaRecorder onstop 事件进行后续处理
+ */
 function stopRecording() {
   if (mediaRecorder && mediaRecorder.state === 'recording') {
     mediaRecorder.stop()
@@ -457,6 +532,10 @@ function stopRecording() {
   }
 }
 
+/**
+ * 取消当前录音（不发送）
+ * 将录音标志位置为 false，onstop 时检测到该标志则放弃发送
+ */
 function cancelRecording() {
   if (isRecording.value) {
     isRecording.value = false // 将标志位置为 false，onstop 时判断该标志位则不会发送
@@ -469,6 +548,12 @@ function cancelRecording() {
 // ---- 播放语音 ----
 let currentAudioPlayer = null
 
+/**
+ * 播放用户发送的语音消息
+ * · 支持点击同一消息停止播放
+ * · 播放新语音时自动停止之前正在播放的语音
+ * @param {Object} msg 消息对象，需包含 audio_base64 字段
+ */
 function playAudio(msg) {
   if (!msg.audio_base64) return
 
@@ -511,6 +596,9 @@ function playAudio(msg) {
 }
 
 // ---- 监听消息变化自动滚底 ----
+/**
+ * 监听消息列表长度变化，自动滚动到底部
+ */
 watch(
   () => chatStore.currentMessages.length,
   () => scrollToBottom()
@@ -881,6 +969,44 @@ onMounted(() => scrollToBottom())
 }
 .message-row.user .message-meta {
   justify-content: flex-end;
+}
+
+/* 推荐问题 */
+.suggested-questions {
+  margin-top: 12px;
+  padding: 12px 14px;
+  background: #f8faff;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+.suggested-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 10px;
+}
+.suggested-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.suggested-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 7px 14px;
+  background: white;
+  border: 1px solid #dce6f5;
+  border-radius: 20px;
+  font-size: 13px;
+  color: var(--primary);
+  cursor: pointer;
+  transition: var(--transition);
+  line-height: 1.4;
+}
+.suggested-chip:hover {
+  background: var(--primary-light);
+  border-color: var(--primary);
+  box-shadow: var(--shadow-sm);
 }
 .meta-time {
   font-size: 11px;

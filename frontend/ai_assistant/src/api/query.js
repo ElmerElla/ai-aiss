@@ -1,6 +1,19 @@
 /**
- * 智能问答 API
- * 对应后端: POST /api/v1/query
+ * 智能问答 API 模块
+ *
+ * 功能介绍：
+ * -----------
+ * 本模块封装了智能问答核心接口，支持多模态输入和流式输出。
+ *
+ * 接口列表：
+ * - POST /query          → 普通问答请求（返回 JSON）
+ * - DELETE /sessions     → 清除所有会话缓存
+ * - askStream()          → 流式问答（SSE 实时输出）
+ *
+ * askStream 实现细节：
+ * - 使用原生 fetch API 代替 Axios，以支持 ReadableStream
+ * - 自动解析 SSE 数据包，逐块回调 onMessage
+ * - 兼容 application/json 回退（某些网关可能改写响应格式）
  */
 import http from './http'
 

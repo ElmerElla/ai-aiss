@@ -1,9 +1,35 @@
+"""
+应用配置模块
+
+功能介绍：
+-----------
+本模块负责统一管理 AI 校园助手后端的所有运行时配置。
+通过 Pydantic Settings 从环境变量（.env 文件）加载配置，
+提供类型安全的配置访问，并自动构建数据库和 Redis 的连接 URL。
+
+主要配置类别：
+- 应用程序基础信息（名称、版本、调试模式、CORS）
+- MySQL 数据库连接参数
+- Redis 缓存连接参数
+- JWT 认证密钥与过期时间
+- AES 密码传输加密密钥
+- 隐私脱敏盐值
+- 对话上下文历史条数限制
+- 阿里云 DashScope / 百炼 API 密钥与模型配置
+- 百炼检索 API 接入凭证
+- 缓存 TTL 策略（敏感/普通）
+
+使用方式：
+    from app.config import settings
+    db_url = settings.database_url
+"""
 from __future__ import annotations
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    """应用配置类，自动从 .env 文件加载环境变量。"""
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
@@ -84,6 +110,7 @@ class Settings(BaseSettings):
 
     @property
     def database_url(self) -> str:
+        """构建 MySQL 异步数据库连接 URL（使用 aiomysql 驱动）。"""
         return (
             f"mysql+aiomysql://{self.MYSQL_USER}:{self.MYSQL_PASSWORD}"
             f"@{self.MYSQL_HOST}:{self.MYSQL_PORT}/{self.MYSQL_DATABASE}"
@@ -92,6 +119,7 @@ class Settings(BaseSettings):
 
     @property
     def redis_url(self) -> str:
+        """构建 Redis 连接 URL，支持有密码和无密码两种模式。"""
         if self.REDIS_PASSWORD:
             return (
                 f"redis://:{self.REDIS_PASSWORD}@{self.REDIS_HOST}"
@@ -101,6 +129,11 @@ class Settings(BaseSettings):
 
     @property
     def cors_allow_origins(self) -> list[str]:
+        """
+        解析 CORS 允许来源配置字符串为列表。
+        
+        支持逗号分隔的多来源，"*" 表示允许所有来源。
+        """
         raw = (self.CORS_ALLOW_ORIGINS or "").strip()
         if not raw:
             return []
@@ -109,4 +142,5 @@ class Settings(BaseSettings):
         return [item.strip() for item in raw.split(",") if item.strip()]
 
 
+# 全局配置实例，供各模块导入使用
 settings = Settings()

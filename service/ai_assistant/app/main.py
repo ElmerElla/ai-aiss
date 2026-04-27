@@ -1,5 +1,21 @@
-"""AI 校园助手 
-FastAPI 应用程序入口点。"""
+"""
+FastAPI 应用主入口模块
+
+功能介绍：
+-----------
+本模块是 AI 校园助手后端的启动入口，负责：
+1. 初始化 FastAPI 应用实例（含生命周期管理、CORS 中间件）
+2. 注册所有 API 路由（认证、查询、管理员、系统）
+3. 检查关键配置项是否使用了不安全的默认值并发出警告
+4. 管理应用启动和关闭生命周期（如 Redis 连接池的优雅关闭）
+
+路由注册：
+- /api/v1/auth/*   → 学生认证路由
+- /api/v1/admin/*  → 管理员路由
+- /api/v1/query    → 智能问答路由（核心）
+- /api/v1/health   → 健康检查
+- /api/v1/version  → 版本信息
+"""
 from __future__ import annotations
 
 import warnings
@@ -23,6 +39,12 @@ _INSECURE_DEFAULTS = {
 
 
 def _check_insecure_defaults() -> None:
+    """
+    检查关键安全配置是否使用了默认值。
+    
+    如果检测到 JWT_SECRET_KEY、AES_SECRET_KEY 或 DID_SALT 使用了预设的弱值，
+    则记录警告并提醒用户在部署前修改 .env 文件。
+    """
     for key, default in _INSECURE_DEFAULTS.items():
         if getattr(settings, key) == default:
             logger.warning("Insecure default detected for {}", key)
@@ -35,7 +57,17 @@ def _check_insecure_defaults() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    """启动/关闭生命周期。"""
+    """
+    FastAPI 应用生命周期管理器。
+    
+    启动阶段：
+        - 检查不安全默认值配置
+    关闭阶段：
+        - 优雅关闭 Redis 连接池（如果已创建）
+    
+    参数:
+        app: FastAPI 应用实例。
+    """
     logger.info("FastAPI lifespan startup begin")
     _check_insecure_defaults()
     logger.info("FastAPI lifespan startup completed")

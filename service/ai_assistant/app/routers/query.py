@@ -1,19 +1,29 @@
-"""查询路由：POST /api/v1/query
+"""
+智能查询路由模块
 
-单一统一的端点，处理来自认证学生的文本/图像/音频问题。
+功能介绍：
+-----------
+本模块是 AI 校园助手的核心路由，提供单一统一的查询端点 /api/v1/query，
+处理来自认证学生的文本/图像/音频多模态问题。
 
-处理流程
---------
+完整处理流程：
 1. 解码多模态输入（图像 → 文本，音频 → 文本）
 2. 组合统一查询文本
-3. 安全检查（自杀/暴力内容）
-4. Redis缓存查找（通过DID + 查询哈希）
-5. 意图分类（qwen-flash）
-6. 查询执行（SQL / 向量 / 混合）
-7. LLM总结（qwen-plus）
-8. 缓存响应
-9. 将两轮对话持久化到chat_log
-10. 返回响应
+3. 安全检查（自杀/暴力内容拦截 + 隐私违规检测）
+4. Redis 缓存查找（通过 DID + 查询哈希）
+5. 会话历史加载（Redis 会话隔离）
+6. 查询重写（结合上下文补全缺失信息）
+7. 意图分类（structured / vector / hybrid / smalltalk）
+8. 查询执行（SQL 结构化查询 / 向量知识库检索 / 混合）
+9. LLM 总结生成回答（qwen-plus，支持流式 SSE）
+10. 响应缓存与对话日志持久化
+
+附加接口：
+- DELETE /sessions → 清除当前学生的所有会话缓存与历史
+
+输出模式：
+- 默认：SSE 流式输出（text/event-stream）
+- JSON：当 output_type="json" 时返回完整 JSON
 """
 from __future__ import annotations
 
@@ -47,6 +57,11 @@ router = APIRouter(prefix="/api/v1", tags=["查询"])
 
 
 def _is_smalltalk_like(text: str) -> bool:
+    """
+    判断查询是否为简短的寒暄/礼貌用语。
+    
+    用于辅助路由决策，识别无需检索数据库的闲聊场景。
+    """
     normalized = (text or "").strip().lower()
     if not normalized:
         return False
@@ -58,7 +73,15 @@ def _is_smalltalk_like(text: str) -> bool:
 
 
 def _is_pure_image_qa(text: str) -> bool:
-    """判断是否为纯图片问答（而非以图片为辅助的结构化查询）。"""
+    """
+    判断是否为纯图片问答（而非以图片为辅助的结构化查询）。
+    
+    逻辑：
+        - 若文本为空 → 判定为纯图片问答
+        - 若包含课表/成绩/选课等结构化关键词 → 非纯图片问答
+        - 若包含解释/分析/评价等图片理解关键词 → 纯图片问答
+        - 文本很短（< 16 字）且无结构化关键词 → 纯图片问答
+    """
     if not text:
         return True
     text_lower = text.strip().lower()
@@ -93,11 +116,17 @@ def _is_pure_image_qa(text: str) -> bool:
 
 
 def _is_campus_related_image(img_text: str) -> bool:
-    """判断图片内容是否与校园/学术知识相关。"""
+    """
+    判断图片内容是否与校园/学术知识相关。
+    
+    通过关键词匹配识别课本、课件、代码、公式、流程图等学术内容，
+    用于决定图片问答的回答策略。
+    """
     if not img_text:
         return False
     text_lower = img_text.lower()
     campus_keywords = (
+        # 学术/技术类
         "流程图", "数据流图", "uml", "类图", "时序图", "思维导图", "架构图",
         "系统图", "模块图", "e-r图", "拓扑图", "状态图", "用例图", "活动图",
         "课本", "教材", "笔记", "课件", "ppt", "幻灯片", "试卷", "习题", "题目",
@@ -113,6 +142,14 @@ def _is_campus_related_image(img_text: str) -> bool:
         "设计模式", "网络协议", "sql", "html", "css", "javascript", "java",
         "python", "c++", "c语言", "编程语言", "框架", "库", "api", "接口",
         "学期", "学分", "必修", "选修", "专业课", "公共课", "通识课",
+        # 学生事务/规章制度类（学生手册、奖励评选、学籍管理等）
+        "奖励", "评选", "奖学金", "助学金", "优秀学生", "三好学生", "标兵",
+        "学生手册", "规章制度", "管理办法", "规定", "条例", "细则", "章程",
+        "请假", "报销", "申请", "审批", "流程", "材料", "条件", "要求",
+        "处分", "违纪", "警告", "通报", "纪律",
+        "毕业证", "学位证", "成绩单", "学籍", "转专业", "休学", "退学", "复学",
+        "宿舍", "食堂", "图书馆", "教务", "校历", "通知", "公告", "办事指南",
+        "辅导员", "班主任", "院长", "校长", "办公会", "会议",
     )
     return any(kw in text_lower for kw in campus_keywords)
 
@@ -134,7 +171,12 @@ _KB_INDICATOR_PATTERNS = (
 
 
 def _is_pure_structured_query(text: str) -> bool:
-    """判断查询是否为明显的纯结构化查询（单一意图，无需知识库辅助）。"""
+    """
+    判断查询是否为明显的纯结构化查询（单一意图，无需知识库辅助）。
+    
+    通过正则模式匹配识别课表、成绩、教师联系方式等明确结构化意图，
+    同时排除包含"为什么"/"怎么办"等需要知识库辅助的混合意图。
+    """
     text_lower = (text or "").lower()
     has_pure = any(re.search(p, text_lower) for p in _PURE_STRUCTURED_PATTERNS)
     if not has_pure:
@@ -144,7 +186,12 @@ def _is_pure_structured_query(text: str) -> bool:
 
 
 def _sse_response(generator):
-    """统一构造 SSE 响应，降低被反向代理缓冲/改写的概率。"""
+    """
+    统一构造 SSE 响应对象。
+    
+    设置专用 HTTP 头（Cache-Control、X-Accel-Buffering 等），
+    降低被反向代理缓冲或改写的概率，确保流式输出顺畅。
+    """
     return StreamingResponse(
         generator,
         media_type="text/event-stream",
@@ -157,6 +204,11 @@ def _sse_response(generator):
 
 
 def _to_public_stream_error(exc: Exception) -> str:
+    """
+    将内部异常转换为用户友好的公开错误信息。
+    
+    针对模型输入超长、AI 服务不可用等常见错误提供明确的提示语。
+    """
     raw = str(exc or "").strip()
     lowered = raw.lower()
 
@@ -168,6 +220,11 @@ def _to_public_stream_error(exc: Exception) -> str:
 
 
 def _session_history_key(did: str, session_id: str) -> str:
+    """
+    构建 Redis 中会话隔离历史的存储键名。
+    
+    格式：chat:session_history:{did}:{session_id}
+    """
     return f"chat:session_history:{did}:{session_id}"
 
 
@@ -178,7 +235,12 @@ async def _load_session_history(
     session_id: str,
     limit: int,
 ):
-    """从 Redis 加载会话隔离历史，返回兼容 intent_service 的消息对象列表。"""
+    """
+    从 Redis 加载会话隔离历史记录。
+    
+    返回兼容 intent_service 的消息对象列表，用于查询重写和回答生成。
+    通过会话隔离避免并发会话之间的上下文串话。
+    """
     key = _session_history_key(did, session_id)
     raw_items = await redis.lrange(key, -limit, -1)
 
@@ -202,7 +264,11 @@ async def _append_session_history(
     sender: SenderEnum,
     content: str,
 ):
-    """向 Redis 写入会话隔离历史，避免并发会话串话。"""
+    """
+    向 Redis 写入单条会话历史记录。
+    
+    自动裁剪列表长度至 MAX_HISTORY_COUNT，并设置 7 天过期时间。
+    """
     key = _session_history_key(did, session_id)
     await redis.rpush(
         key,
@@ -227,6 +293,21 @@ async def query_endpoint(
     db: AsyncSession = Depends(get_db),
     redis: aioredis.Redis = Depends(get_redis),
 ) -> StreamingResponse | QueryResponse:
+    """
+    智能问答核心接口（支持多模态输入和流式输出）。
+    
+    参数:
+        body: 查询请求体（含文本/图片/音频/session_id/output_type）
+        student_id: 从 JWT 解析的当前学生学号
+        db: 数据库会话
+        redis: Redis 客户端
+    
+    返回:
+        StreamingResponse: SSE 流式输出（默认）
+        QueryResponse: 完整 JSON 响应（output_type="json" 时）
+    
+    完整处理流程详见模块文档字符串。
+    """
     start_ms = time.time()
     session_id = body.session_id or str(uuid.uuid4())
     wants_json_output = (body.output_type or "").strip().lower() == "json"
@@ -312,11 +393,24 @@ async def query_endpoint(
                 session_id=session_id,
                 response_time_ms=elapsed,
                 cached=True,
+                suggested_questions=cached.get("suggested_questions", []),
             )
 
         async def _mock_stream_cache():
-            yield f"data: {json.dumps({'chunk': cached['answer'], 'done': False}, ensure_ascii=False)}\n\n"
-            yield f"data: {json.dumps({'chunk': '', 'response_time_ms': elapsed, 'cached': True, 'done': True}, ensure_ascii=False)}\n\n"
+            final_payload = {
+                "chunk": cached["answer"],
+                "done": False,
+            }
+            yield f"data: {json.dumps(final_payload, ensure_ascii=False)}\n\n"
+            done_payload = {
+                "chunk": "",
+                "response_time_ms": elapsed,
+                "cached": True,
+                "done": True,
+            }
+            if "suggested_questions" in cached:
+                done_payload["suggested_questions"] = cached["suggested_questions"]
+            yield f"data: {json.dumps(done_payload, ensure_ascii=False)}\n\n"
         return _sse_response(_mock_stream_cache())
     if redis_available:
         logger.info("Cache miss: did={}", did[:12])
@@ -514,6 +608,7 @@ async def query_endpoint(
     # ------------------------------------------------------------------
     skip_query_execution = False
     image_direct_context = ""
+    suggest_task = None
     if body.image_base64 and _is_pure_image_qa(body.text or ""):
         # 强制改为 smalltalk，避免触发任何检索
         intent = IntentType.smalltalk
@@ -532,6 +627,8 @@ async def query_endpoint(
             )
             logger.info("Image query routed as non-campus direct QA")
         skip_query_execution = True
+        # 异步启动推荐问题生成
+        suggest_task = asyncio.create_task(intent_service.generate_suggested_questions(img_text or ""))
 
     # ------------------------------------------------------------------
     # 6. 查询执行 (基于重写后的查询)
@@ -615,12 +712,24 @@ async def query_endpoint(
 
         elapsed = int((time.time() - start_ms) * 1000)
 
+        # 获取推荐问题（如果启用了）
+        suggested_questions = []
+        if suggest_task is not None:
+            try:
+                suggested_questions = await suggest_task
+                logger.info("JSON suggested questions ready: count={}", len(suggested_questions))
+            except Exception:
+                logger.exception("Failed to get suggested questions for JSON output")
+
         sensitive = cache_service.is_sensitive_query(unified_query)
+        cache_payload = {"answer": final_ans}
+        if suggested_questions:
+            cache_payload["suggested_questions"] = suggested_questions
         await cache_service.set_cached_response(
             redis,
             did,
             unified_query,
-            {"answer": final_ans},
+            cache_payload,
             sensitive=sensitive,
         )
         logger.info("JSON response cached: sensitive={}", sensitive)
@@ -653,6 +762,7 @@ async def query_endpoint(
             session_id=session_id,
             response_time_ms=elapsed,
             cached=False,
+            suggested_questions=suggested_questions,
         )
 
     # ------------------------------------------------------------------
@@ -702,13 +812,25 @@ async def query_endpoint(
             elapsed = int((time.time() - start_ms) * 1000)
             logger.info("SSE generation completed: chunks={}, answer_len={}, elapsed_ms={}", chunk_count, len(final_ans), elapsed)
 
+            # 获取推荐问题（如果启用了）
+            suggested_questions = []
+            if suggest_task is not None:
+                try:
+                    suggested_questions = await suggest_task
+                    logger.info("Suggested questions ready: count={}", len(suggested_questions))
+                except Exception:
+                    logger.exception("Failed to get suggested questions")
+
             # 发送最后的数据包，包含完全的响应元数据段以及通知结束
-            final_payload = json.dumps({
+            final_payload_obj = {
                 "chunk": "",
                 "response_time_ms": elapsed,
                 "cached": False,
-                "done": True
-            }, ensure_ascii=False)
+                "done": True,
+            }
+            if suggested_questions:
+                final_payload_obj["suggested_questions"] = suggested_questions
+            final_payload = json.dumps(final_payload_obj, ensure_ascii=False)
             yield f"data: {final_payload}\n\n"
             
             # Streaming 结束后，在此保存缓存和聊天日志
@@ -760,7 +882,13 @@ async def clear_cache_endpoint(
     redis: aioredis.Redis = Depends(get_redis),
 ):
     """
-    清除该学生的 Redis 缓存和间隔会话历史。
+    清除当前学生的所有 Redis 会话缓存与历史记录。
+    
+    删除两类数据：
+        - chat_cache:*:{did}:*       → 查询响应缓存
+        - chat:session_history:{did}:* → 会话隔离历史
+    
+    返回清除的键数量。
     """
     did = generate_did(student_id)
     deleted_keys_count = 0

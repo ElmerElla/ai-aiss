@@ -1,10 +1,22 @@
-"""Redis 缓存服务。
+"""
+Redis 缓存服务模块
 
-缓存键格式：``chat_cache:{version}:{did}:{query_hash}``
+功能介绍：
+-----------
+本模块提供基于 Redis 的查询响应缓存服务，用于加速常见问题回答并降低 AI 服务调用成本。
+
+缓存键格式：
+    chat_cache:{version}:{did}:{query_hash}
 
 TTL 规则：
-- 敏感/隐私查询 → 30 分钟 (settings.CACHE_TTL_SENSITIVE)
-- 普通查询 → 1 天 (settings.CACHE_TTL_NORMAL)
+- 敏感/隐私查询（成绩/学籍等）→ 30 分钟
+- 普通查询 → 1 天
+- 课表相关查询 → 与课表缓存版本号绑定，管理员调课后自动失效
+
+特殊机制：
+- 日期敏感查询（今天/明天/本周等）按天桶隔离，跨天自动失效
+- 课表敏感查询与 schedule_cache_version 绑定，确保数据一致性
+- 缓存版本号升级可自动隔离旧缓存，避免脏数据复用
 """
 from __future__ import annotations
 
@@ -42,33 +54,38 @@ _SCHEDULE_CACHE_VERSION_KEY = "chat_cache:schedule_version"
 
 
 def _today_bucket() -> str:
-    """返回当天日期桶（本地日期）。"""
+    """返回当天日期字符串（ISO 格式），用于日期敏感查询的缓存桶隔离。"""
     return date.today().isoformat()
 
 
 def _make_cache_key(did: str, query_text: str) -> str:
-    """生成缓存键：chat_cache:{version}:{did}:{query_md5}。"""
+    """
+    生成缓存键。
+    
+    格式：chat_cache:{version}:{did}:{query_md5}
+    其中 query_md5 为查询文本小写并去除首尾空白后的 MD5 哈希。
+    """
     query_hash = hashlib.md5(query_text.strip().lower().encode("utf-8")).hexdigest()
     return f"chat_cache:{_CACHE_KEY_VERSION}:{did}:{query_hash}"
 
 
 def is_sensitive_query(query_text: str) -> bool:
-    """检查查询是否包含敏感关键词。"""
+    """检查查询文本是否包含成绩/学籍/联系方式等敏感关键词。"""
     return bool(_SENSITIVE_PATTERNS.search(query_text))
 
 
 def is_date_sensitive_query(query_text: str) -> bool:
-    """检查查询是否包含相对时间语义（跨天后应重新计算）。"""
+    """检查查询是否包含今天/明天/本周等相对时间语义（跨天后缓存应失效）。"""
     return bool(_DATE_SENSITIVE_PATTERNS.search(query_text or ""))
 
 
 def is_schedule_sensitive_query(query_text: str) -> bool:
-    """检查查询是否与课表相关（管理员调课后应失效重算）。"""
+    """检查查询是否与课表/课程安排相关（管理员调课后缓存应失效）。"""
     return bool(_SCHEDULE_SENSITIVE_PATTERNS.search(query_text or ""))
 
 
 async def get_schedule_cache_version(redis: aioredis.Redis) -> str:
-    """获取当前课表缓存版本号。"""
+    """获取当前课表缓存版本号（字符串），若不存在则返回 "0"。"""
     raw = await redis.get(_SCHEDULE_CACHE_VERSION_KEY)
     if raw is None:
         return "0"
@@ -76,14 +93,14 @@ async def get_schedule_cache_version(redis: aioredis.Redis) -> str:
 
 
 async def bump_schedule_cache_version(redis: aioredis.Redis) -> str:
-    """管理员改课后递增课表缓存版本号。"""
+    """管理员改课后递增课表缓存版本号，使所有课表相关缓存自动失效。"""
     version = await redis.incr(_SCHEDULE_CACHE_VERSION_KEY)
     logger.info("Schedule cache version bumped: version={}", version)
     return str(version)
 
 
 def get_ttl(query_text: str) -> int:
-    """根据敏感性返回缓存过期时间（秒）。"""
+    """根据查询敏感性返回缓存 TTL（秒）：敏感查询 30 分钟，普通查询 1 天。"""
     if is_sensitive_query(query_text):
         return settings.CACHE_TTL_SENSITIVE
     return settings.CACHE_TTL_NORMAL
@@ -92,7 +109,13 @@ def get_ttl(query_text: str) -> int:
 async def get_cached_response(
     redis: aioredis.Redis, did: str, query_text: str
 ) -> dict | None:
-    """查询缓存。如果未命中返回 None。"""
+    """
+    查询缓存。若命中则返回响应字典；若未命中或缓存已过期则返回 None。
+    
+    过期检查：
+        - 日期敏感查询：按天桶比对
+        - 课表敏感查询：按 schedule_cache_version 比对
+    """
     key = _make_cache_key(did, query_text)
     raw = await redis.get(key)
     if raw is None:
@@ -154,7 +177,12 @@ async def set_cached_response(
     *,
     sensitive: bool | None = None,
 ) -> None:
-    """写入缓存。"""
+    """
+    将查询响应写入 Redis 缓存。
+    
+    自动附加缓存元数据（_cache_meta），包括日期桶和课表缓存版本号，
+    供后续读取时进行过期校验。
+    """
     key = _make_cache_key(did, query_text)
     if sensitive is None:
         sensitive = is_sensitive_query(query_text)

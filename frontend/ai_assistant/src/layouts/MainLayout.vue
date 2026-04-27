@@ -115,6 +115,18 @@
   </div>
 </template>
 
+/**
+ * 主布局组件
+ *
+ * 功能介绍：
+ * · 提供学生端应用的左侧边栏 + 主内容区双栏布局
+ * · 侧边栏包含：Logo、新建对话按钮、会话搜索框、会话列表、底部导航
+ * · 支持会话切换、删除、新建操作
+ * · 底部导航提供智能问答、个人信息、修改密码、退出登录入口
+ * · 展示当前用户脱敏学号与套餐信息
+ * · 响应式适配：桌面端固定侧边栏，移动端侧边栏可滑动收起并带遮罩层
+ * · 窗口大小变化时自动调整侧边栏展开/收起状态
+ */
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
@@ -128,11 +140,18 @@ const authStore = useAuthStore()
 const chatStore = useChatStore()
 
 const windowWidth = ref(window.innerWidth)
+/** 是否为移动端（窗口宽度 < 768px） */
 const isMobile = computed(() => windowWidth.value < 768)
+/** 侧边栏收起状态（移动端默认收起） */
 const sidebarCollapsed = ref(window.innerWidth < 768)
 
+/** 当前登录学生的脱敏学号 */
 const maskedId = computed(() => maskStudentId(authStore.studentId))
 
+/**
+ * 处理窗口大小变化
+ * 桌面端（>=768px）自动展开侧边栏
+ */
 function handleResize() {
   windowWidth.value = window.innerWidth
   if (windowWidth.value >= 768) {
@@ -143,6 +162,10 @@ function handleResize() {
 onMounted(() => window.addEventListener('resize', handleResize))
 onUnmounted(() => window.removeEventListener('resize', handleResize))
 
+/**
+ * 新建对话
+ * 创建新会话后跳转至 Chat 页面，移动端自动收起侧边栏
+ */
 function handleNewChat() {
   chatStore.createSession()
   if (route.name !== 'Chat') {
@@ -151,6 +174,11 @@ function handleNewChat() {
   if (isMobile.value) sidebarCollapsed.value = true
 }
 
+/**
+ * 切换到指定会话
+ * 跳转至 Chat 页面并激活对应会话，移动端自动收起侧边栏
+ * @param {string} sessionId 会话 ID
+ */
 function handleSwitchSession(sessionId) {
   chatStore.switchSession(sessionId)
   if (route.name !== 'Chat') {
@@ -159,12 +187,21 @@ function handleSwitchSession(sessionId) {
   if (isMobile.value) sidebarCollapsed.value = true
 }
 
+/**
+ * 删除指定会话
+ * 弹出确认对话框后调用 chatStore.deleteSession
+ * @param {string} sessionId 会话 ID
+ */
 function handleDeleteSession(sessionId) {
   if (confirm('确定要删除此对话吗？删除后无法恢复。')) {
     chatStore.deleteSession(sessionId)
   }
 }
 
+/**
+ * 处理退出登录
+ * 确认后执行 authStore.logout、chatStore.clearAllSessions，并跳转至 Login 页
+ */
 function handleLogout() {
   if (confirm('确定要退出登录吗？')) {
     authStore.logout()

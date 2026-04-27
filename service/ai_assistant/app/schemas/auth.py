@@ -1,3 +1,18 @@
+"""
+学生认证相关 Pydantic 模式模块
+
+功能介绍：
+-----------
+本模块定义了学生认证接口的请求和响应数据模型（Schema）。
+
+模式列表：
+- LoginRequest / TokenResponse: 登录请求与响应
+- ChangePasswordRequest / ChangePasswordResponse: 修改密码请求与响应
+
+兼容处理：
+- 同时支持 encrypted_password 和 password 字段名（向后兼容）
+- 同时支持 encrypted_old_password/old_password 和 encrypted_new_password/new_password
+"""
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 

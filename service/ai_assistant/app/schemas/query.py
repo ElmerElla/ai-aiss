@@ -1,3 +1,15 @@
+"""
+智能查询相关 Pydantic 模式模块
+
+功能介绍：
+-----------
+本模块定义了查询接口的请求和响应数据模型（Schema）。
+
+模式列表：
+- IntentType: 查询意图枚举（structured / vector / hybrid / smalltalk）
+- QueryRequest: 查询请求（支持文本/图片/音频/session_id/output_type）
+- QueryResponse: 查询响应（answer / session_id / response_time_ms / cached）
+"""
 from __future__ import annotations
 
 from enum import Enum
@@ -28,4 +40,8 @@ class QueryResponse(BaseModel):
     session_id: str = Field(..., description="本次会话 ID")
     response_time_ms: int = Field(..., description="耗时（毫秒）")
     cached: bool = Field(False, description="是否来自缓存")
+    suggested_questions: list[str] = Field(
+        default_factory=list,
+        description="推荐后续问题（图片问答场景）",
+    )
 

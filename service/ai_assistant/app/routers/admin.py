@@ -1,4 +1,22 @@
-"""管理员路由：登录与课表管理。"""
+"""
+管理员路由模块
+
+功能介绍：
+-----------
+本模块提供管理员后台的所有 API 接口，前缀为 /api/v1/admin。
+
+接口列表：
+- POST /admin/auth/login        → 管理员登录（返回 JWT）
+- GET  /admin/auth/me           → 获取当前管理员信息
+- GET  /admin/dashboard/summary → 管理面板概览统计
+- GET  /admin/meta/terms        → 获取学期列表
+- GET  /admin/meta/classes      → 获取班级列表（含院系/专业）
+- GET  /admin/schedules         → 课表列表查询（支持多条件筛选）
+- PATCH /admin/schedules/{id}/status → 更新课表状态（正常/取消）
+
+权限控制：
+所有接口均需要管理员 JWT Token（除登录接口外）。
+"""
 from __future__ import annotations
 
 from datetime import datetime
@@ -58,6 +76,18 @@ async def admin_login(
     body: AdminLoginRequest,
     db: AsyncSession = Depends(get_db),
 ) -> AdminTokenResponse:
+    """
+    管理员登录接口。
+    
+    流程：
+        1. 解密前端 AES 加密密码
+        2. 验证用户名和密码哈希
+        3. 生成管理员 JWT Token 并返回
+    
+    异常:
+        HTTPException(401): 用户名或密码无效。
+        HTTPException(403): 管理员账号被禁用或锁定。
+    """
     try:
         admin = await authenticate_admin(db, body.username, body.encrypted_password)
     except ValueError:
@@ -90,6 +120,11 @@ async def admin_login(
 async def admin_me(
     current_admin: AdminUser = Depends(get_current_admin),
 ) -> AdminMeResponse:
+    """
+    获取当前登录管理员的基本信息。
+    
+    需要有效的管理员 Bearer Token。
+    """
     return AdminMeResponse(
         admin_id=current_admin.admin_id,
         admin_code=current_admin.admin_code,
@@ -108,6 +143,16 @@ async def dashboard_summary(
     _current_admin: AdminUser = Depends(get_current_admin),
     db: AsyncSession = Depends(get_db),
 ) -> AdminDashboardSummaryResponse:
+    """
+    管理面板概览统计数据。
+    
+    返回：
+        - pending_adjustments: 待处理调课申请数
+        - active_schedules: 正常课表记录数
+        - cancelled_schedules: 已取消课表记录数
+        - total_classes: 班级总数
+        - total_terms: 学期总数
+    """
     pending_adjustments = (
         await db.execute(
             select(func.count())
@@ -153,6 +198,9 @@ async def list_terms(
     _current_admin: AdminUser = Depends(get_current_admin),
     db: AsyncSession = Depends(get_db),
 ) -> list[AdminTermItem]:
+    """
+    获取所有学期列表，按开始日期降序排列。
+    """
     terms = (
         await db.execute(select(Term).order_by(Term.start_date.desc()))
     ).scalars().all()
@@ -175,6 +223,11 @@ async def list_classes(
     _current_admin: AdminUser = Depends(get_current_admin),
     db: AsyncSession = Depends(get_db),
 ) -> list[AdminClassItem]:
+    """
+    获取所有班级列表，包含所属专业和院系信息。
+    
+    按年级降序、班级ID升序排列。
+    """
     rows = (
         await db.execute(
             select(Class, Major, Department)
@@ -212,6 +265,18 @@ async def list_schedules(
     _current_admin: AdminUser = Depends(get_current_admin),
     db: AsyncSession = Depends(get_db),
 ) -> AdminScheduleListResponse:
+    """
+    管理员课表列表查询接口。
+    
+    支持多维度筛选：
+        - term_id: 按学期过滤
+        - class_id: 按班级过滤
+        - week_no: 按周次过滤
+        - schedule_status: 按状态过滤（active/cancelled）
+        - keyword: 关键词模糊匹配（课程名/教师名/教室/班级）
+    
+    返回分页后的课表列表，每条记录包含关联的班级信息。
+    """
     query = (
         select(Schedule, Course, Teacher, Classroom, Class, Major, Department)
         .join(ScheduleClassMap, ScheduleClassMap.schedule_id == Schedule.schedule_id)
@@ -313,6 +378,22 @@ async def update_schedule_status(
     db: AsyncSession = Depends(get_db),
     redis: aioredis.Redis = Depends(get_redis),
 ) -> UpdateScheduleStatusResponse:
+    """
+    更新指定课表记录的状态（正常 ↔ 取消）。
+    
+    流程：
+        1. 查找课表记录
+        2. 若状态变化，更新状态、版本号和操作时间
+        3. 记录操作审计日志（AdminActionLog）
+        4. 触发课表缓存版本号递增，使学生端缓存失效
+    
+    参数:
+        schedule_id: 课表记录唯一标识。
+        body: 目标状态和操作原因。
+    
+    异常:
+        HTTPException(404): 课表记录不存在。
+    """
     schedule = (
         await db.execute(
             select(Schedule).where(Schedule.schedule_id == schedule_id).limit(1)

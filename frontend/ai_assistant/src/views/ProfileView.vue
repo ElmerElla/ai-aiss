@@ -95,6 +95,16 @@
   </div>
 </template>
 
+/**
+ * 个人信息视图组件
+ *
+ * 功能介绍：
+ * · 展示当前学生的账户信息（学号、认证状态、Token 有效期、设备标识 DID）
+ * · 展示聊天统计数据（当前会话数、总消息数）
+ * · 提供修改密码与清除所有对话的操作入口
+ * · 展示系统状态信息（服务健康检查、版本号、API 基础路径）
+ * · 支持手动刷新系统状态
+ */
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useAuthStore } from '@/stores/auth'
@@ -110,6 +120,10 @@ const healthStatus = ref('loading') // 'ok' | 'error' | 'loading'
 const versionInfo = ref(null)
 const systemLoading = ref(false)
 
+/**
+ * 格式化 Token 过期时间为本地可读字符串
+ * @returns {string}
+ */
 const expiresAtFormatted = computed(() => {
   if (!authStore.expiresAt) return '未知'
   return new Date(authStore.expiresAt).toLocaleString('zh-CN', {
@@ -121,10 +135,18 @@ const expiresAtFormatted = computed(() => {
   })
 })
 
+/**
+ * 计算所有会话中的消息总数
+ * @returns {number}
+ */
 const totalMessages = computed(() => {
   return chatStore.sessions.reduce((sum, s) => sum + s.messages.length, 0)
 })
 
+/**
+ * 根据健康状态返回对应的 CSS 类名
+ * @returns {string} 'green' | 'yellow' | 'red'
+ */
 const healthStatusClass = computed(() => {
   switch (healthStatus.value) {
     case 'ok': return 'green'
@@ -133,6 +155,10 @@ const healthStatusClass = computed(() => {
   }
 })
 
+/**
+ * 根据健康状态返回对应的中文描述
+ * @returns {string}
+ */
 const healthStatusText = computed(() => {
   switch (healthStatus.value) {
     case 'ok': return '正常运行'
@@ -141,6 +167,10 @@ const healthStatusText = computed(() => {
   }
 })
 
+/**
+ * 调用后端健康检查接口
+ * 更新 healthStatus 为 'ok' 或 'error'
+ */
 async function checkHealth() {
   try {
     const { data } = await systemApi.healthCheck()
@@ -150,6 +180,10 @@ async function checkHealth() {
   }
 }
 
+/**
+ * 调用后端版本信息接口
+ * 更新 versionInfo 对象
+ */
 async function fetchVersion() {
   try {
     const { data } = await systemApi.getVersion()
@@ -159,6 +193,10 @@ async function fetchVersion() {
   }
 }
 
+/**
+ * 刷新系统信息（并行调用健康检查与版本接口）
+ * 自动设置 systemLoading 状态
+ */
 async function refreshSystemInfo() {
   systemLoading.value = true
   healthStatus.value = 'loading'
@@ -166,6 +204,10 @@ async function refreshSystemInfo() {
   systemLoading.value = false
 }
 
+/**
+ * 处理清除所有对话记录操作
+ * 弹出确认对话框后调用 chatStore.clearAllSessions()
+ */
 function handleClearData() {
   if (confirm('确定要清除所有对话记录吗？此操作无法撤销。')) {
     chatStore.clearAllSessions()

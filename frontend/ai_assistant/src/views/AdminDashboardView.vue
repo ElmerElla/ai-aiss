@@ -175,6 +175,18 @@
   </div>
 </template>
 
+/**
+ * 管理员课表管理仪表盘视图组件
+ *
+ * 功能介绍：
+ * · 展示课表管理后台统计概览（待处理调课、启用/停用课表、班级总数、学期总数）
+ * · 提供多维度课表筛选器（学期、班级、状态、周次、关键词）
+ * · 分页展示课表列表，支持每页条数切换
+ * · 支持启用/停用课表操作（停用需填写原因）
+ * · 展示管理员身份信息与角色徽章
+ * · 提供刷新统计与退出登录功能
+ * · 响应式布局适配（大屏 5 列、平板 3 列、手机 2 列）
+ */
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
@@ -184,6 +196,7 @@ import { useAdminAuthStore } from '@/stores/adminAuth'
 const router = useRouter()
 const adminAuth = useAdminAuthStore()
 
+/** 统计概览数据 */
 const summary = reactive({
   pending_adjustments: 0,
   active_schedules: 0,
@@ -198,6 +211,7 @@ const schedules = ref([])
 const total = ref(0)
 const weekOptions = Array.from({ length: 30 }, (_, index) => index + 1)
 
+/** 筛选条件与分页参数 */
 const filters = reactive({
   term_id: '',
   class_id: '',
@@ -211,12 +225,19 @@ const filters = reactive({
 const loadingSchedules = ref(false)
 const errorMsg = ref('')
 
+/** 当前页码（从 1 开始） */
 const currentPage = computed(() => Math.floor(filters.offset / filters.limit) + 1)
+/** 总页数（至少 1 页） */
 const totalPages = computed(() => {
   const pages = Math.ceil(total.value / filters.limit)
   return pages > 0 ? pages : 1
 })
 
+/**
+ * 根据当前筛选条件构建查询参数对象
+ * 仅包含有值的筛选字段
+ * @returns {Object} 查询参数
+ */
 function buildQueryParams() {
   const params = {
     limit: filters.limit,
@@ -230,12 +251,20 @@ function buildQueryParams() {
   return params
 }
 
+/**
+ * 加载元数据（学期列表与班级列表）
+ * 并行调用 adminApi.getTerms 与 adminApi.getClasses
+ */
 async function loadMeta() {
   const [termsRes, classesRes] = await Promise.all([adminApi.getTerms(), adminApi.getClasses()])
   terms.value = termsRes.data || []
   classes.value = classesRes.data || []
 }
 
+/**
+ * 加载统计概览数据
+ * 更新 summary 对象的各字段
+ */
 async function loadSummary() {
   const { data } = await adminApi.getSummary()
   summary.pending_adjustments = data.pending_adjustments || 0
@@ -245,6 +274,11 @@ async function loadSummary() {
   summary.total_terms = data.total_terms || 0
 }
 
+/**
+ * 加载课表列表（带筛选与分页）
+ * 根据当前 filters 与 buildQueryParams 结果请求后端
+ * 更新 schedules 与 total
+ */
 async function loadSchedules() {
   loadingSchedules.value = true
   errorMsg.value = ''
@@ -262,6 +296,10 @@ async function loadSchedules() {
   }
 }
 
+/**
+ * 初始化仪表盘数据
+ * 并行加载元数据与统计概览，成功后加载课表列表
+ */
 async function initialize() {
   try {
     await Promise.all([loadMeta(), loadSummary()])
@@ -271,11 +309,18 @@ async function initialize() {
   }
 }
 
+/**
+ * 应用筛选条件并重新加载课表
+ * 自动将分页偏移重置为 0
+ */
 function applyFilters() {
   filters.offset = 0
   loadSchedules()
 }
 
+/**
+ * 重置所有筛选条件为默认值并重新加载课表
+ */
 function resetFilters() {
   filters.term_id = ''
   filters.class_id = ''
@@ -287,23 +332,42 @@ function resetFilters() {
   loadSchedules()
 }
 
+/**
+ * 上一页
+ * 减少 offset 后重新加载课表
+ */
 function prevPage() {
   if (currentPage.value <= 1) return
   filters.offset = Math.max(0, filters.offset - filters.limit)
   loadSchedules()
 }
 
+/**
+ * 下一页
+ * 增加 offset 后重新加载课表
+ */
 function nextPage() {
   if (currentPage.value >= totalPages.value) return
   filters.offset += filters.limit
   loadSchedules()
 }
 
+/**
+ * 将班级数组格式化为中文顿号分隔的字符串
+ * @param {Array} items 班级对象数组
+ * @returns {string}
+ */
 function formatClasses(items) {
   if (!items?.length) return '-'
   return items.map((item) => item.class_name).join('、')
 }
 
+/**
+ * 格式化课表时间为中文可读字符串
+ * 示例：第3周 周三 第1-2节 (全周)
+ * @param {Object} item 课表对象
+ * @returns {string}
+ */
 function formatScheduleTime(item) {
   const dayMap = {
     1: '周一',
@@ -319,6 +383,11 @@ function formatScheduleTime(item) {
   return `第${item.week_no}周 ${dayLabel} 第${item.start_period}-${item.end_period}节 (${patternLabel})`
 }
 
+/**
+ * 将日期值格式化为中文本地字符串
+ * @param {string|Date} value 日期值
+ * @returns {string}
+ */
 function formatDateTime(value) {
   if (!value) return '-'
   const date = new Date(value)
@@ -326,6 +395,13 @@ function formatDateTime(value) {
   return date.toLocaleString('zh-CN', { hour12: false })
 }
 
+/**
+ * 切换课表启用/停用状态
+ * · 弹出确认对话框
+ * · 停用时可选输入原因
+ * · 成功后刷新课表列表与统计概览
+ * @param {Object} item 课表对象
+ */
 async function toggleScheduleStatus(item) {
   const isActive = item.schedule_status === 'active'
   const targetStatus = isActive ? 'cancelled' : 'active'
@@ -350,6 +426,10 @@ async function toggleScheduleStatus(item) {
   }
 }
 
+/**
+ * 处理管理员登出
+ * 调用 adminAuth.logout 后跳转至管理员登录页
+ */
 function handleLogout() {
   adminAuth.logout()
   router.replace({ name: 'AdminLogin' })

@@ -1,7 +1,20 @@
-"""统一日志配置（Loguru）。
+"""
+统一日志配置模块
 
-- 控制台输出 + 文件落盘
-- 文件格式为 .txt，默认位于 service/ai_assistant/logs/
+功能介绍：
+-----------
+本模块基于 Loguru 配置全局日志系统，提供控制台输出和文件落盘双通道。
+
+输出目标：
+- 控制台（stdout）: INFO 级别及以上，带颜色
+- 文件（logs/ai_assistant_runtime.txt）: DEBUG 级别及以上，按 10MB 轮转，保留 14 天
+
+格式：
+    时间 | 级别 | 模块名:函数名:行号 - 消息
+
+使用方式：
+    from app.utils.logger import logger
+    logger.info("操作日志 {}", value)
 """
 from __future__ import annotations
 

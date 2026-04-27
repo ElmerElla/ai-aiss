@@ -1,5 +1,14 @@
 /**
- * 管理员认证状态管理
+ * 管理员认证状态管理 (Pinia Store)
+ *
+ * 功能介绍：
+ * · 管理管理员后台的登录状态（JWT Token、管理员ID、用户名、显示名、角色）
+ * · 登录时通过 AES-CBC 加密密码后发送至后端
+ * · 登出时清除 localStorage 与内存中的全部管理员信息
+ * · 提供 isAuthenticated 计算属性自动判断 Token 是否有效
+ *
+ * 存储键：campus_ai_admin_token / campus_ai_admin_id / campus_ai_admin_username
+ *         / campus_ai_admin_display_name / campus_ai_admin_role / campus_ai_admin_expires_at
  */
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
@@ -21,10 +30,20 @@ export const useAdminAuthStore = defineStore('adminAuth', () => {
   const role = ref(localStorage.getItem(ROLE_KEY) || '')
   const expiresAt = ref(Number(localStorage.getItem(EXPIRES_KEY)) || 0)
 
+  /**
+   * 判断当前管理员是否已登录且 Token 未过期
+   * @returns {boolean}
+   */
   const isAuthenticated = computed(() => {
     return !!token.value && Date.now() < expiresAt.value
   })
 
+  /**
+   * 管理员登录
+   * @param {string} usernameInput 用户名
+   * @param {string} password 明文密码（内部自动 AES-CBC 加密）
+   * @returns {Promise<Object>} 后端登录响应数据 { access_token, token_type, expires_in, admin_id, username, display_name, role }
+   */
   async function login(usernameInput, password) {
     const encrypted = encryptPassword(password)
     const { data } = await adminApi.login(usernameInput, encrypted)
@@ -46,6 +65,10 @@ export const useAdminAuthStore = defineStore('adminAuth', () => {
     return data
   }
 
+  /**
+   * 管理员登出并清除所有本地认证状态
+   * 会同步清空 Pinia state 与 localStorage 中的全部管理员字段
+   */
   function logout() {
     token.value = ''
     adminId.value = 0

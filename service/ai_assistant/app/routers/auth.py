@@ -1,4 +1,18 @@
-"""认证路由：POST /api/v1/auth/login"""
+"""
+学生认证路由模块
+
+功能介绍：
+-----------
+本模块提供学生端的认证相关 API 接口，前缀为 /api/v1/auth。
+
+接口列表：
+- POST /auth/login          → 学生登录（验证 AES 加密密码，返回 JWT）
+- POST /auth/change-password → 修改密码（需携带旧密码验证）
+
+安全机制：
+- 前端密码使用 AES-CBC 加密传输，后端解密后验证 SHA256 哈希
+- 登录成功后返回 JWT Bearer Token，后续请求通过 Authorization 头携带
+"""
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -34,6 +48,17 @@ async def login(
     body: LoginRequest,
     db: AsyncSession = Depends(get_db),
 ) -> TokenResponse:
+    """
+    学生登录接口。
+    
+    流程：
+        1. 解密前端 AES 加密密码
+        2. 验证学号和密码哈希
+        3. 生成 JWT Token 并返回
+    
+    异常:
+        HTTPException(401): 学号或密码无效。
+    """
     try:
         student = await authenticate_student(
             db, body.student_id, body.encrypted_password
@@ -63,6 +88,19 @@ async def change_password_endpoint(
     current_student_id: str = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ChangePasswordResponse:
+    """
+    学生修改密码接口。
+    
+    安全校验：
+        - 只能修改自己的密码（通过 Token 中的 student_id 校验）
+        - 必须提供正确的旧密码
+        - 新密码不能与旧密码相同
+    
+    异常:
+        HTTPException(403): 试图修改他人密码。
+        HTTPException(404): 学生不存在。
+        HTTPException(400): 旧密码错误或新密码与旧密码相同。
+    """
     if body.student_id != current_student_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
